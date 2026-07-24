@@ -25,14 +25,14 @@ test("server-renders the finished Russian landing page", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 
-test("checkout contains accessible order controls", async () => {
+test("checkout is safely paused while YooKassa is not configured", async () => {
   const response = await render("/checkout?plan=start");
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Почти готово/);
-  assert.match(html, /name="email"/);
-  assert.match(html, /type="checkbox"/);
-  assert.match(html, /Перейти к оплате/);
+  assert.match(html, /Оплата пока закрыта/);
+  assert.match(html, /деньги не принимаются/);
+  assert.doesNotMatch(html, /Перейти к оплате/);
 });
 
 test("starter preview dependency is removed", async () => {

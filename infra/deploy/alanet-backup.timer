@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ALANET production backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

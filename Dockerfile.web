@@ -1,0 +1,24 @@
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+ARG NEXT_PUBLIC_API_URL=https://api.alanet.ru
+ARG NEXT_PUBLIC_SITE_URL=https://account.alanet.ru
+ARG NEXT_PUBLIC_CHECKOUT_ENABLED=false
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL \
+    NEXT_PUBLIC_CHECKOUT_ENABLED=$NEXT_PUBLIC_CHECKOUT_ENABLED
+RUN npm run build
+
+FROM node:24-alpine
+WORKDIR /app
+ENV NODE_ENV=production HOSTNAME=0.0.0.0 PORT=3000
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/public ./public
+COPY --from=build /app/vite.config.ts /app/tsconfig.json ./
+USER node
+EXPOSE 3000
+CMD ["./node_modules/.bin/vinext", "start", "--host", "0.0.0.0", "--port", "3000"]

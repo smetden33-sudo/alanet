@@ -1,5 +1,5 @@
 from functools import lru_cache
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     public_api_url: str = "http://localhost:8000"
     public_site_url: str = "http://localhost:3000"
     cors_origins: str = "http://localhost:3000"
+    yookassa_enabled: bool = False
     yookassa_shop_id: str = ""
     yookassa_secret_key: SecretStr = SecretStr("")
     yookassa_vat_code: int = 1
@@ -20,6 +21,11 @@ class Settings(BaseSettings):
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_webhook_secret: SecretStr = SecretStr("")
     telegram_admin_chat_id: int | None = None
+
+    @field_validator("telegram_admin_chat_id", mode="before")
+    @classmethod
+    def empty_integer_is_none(cls, value):
+        return None if value == "" else value
 
     @property
     def cors_origin_list(self) -> list[str]:

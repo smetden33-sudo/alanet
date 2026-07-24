@@ -1,0 +1,54 @@
+{
+	email {$ACME_EMAIL}
+	admin off
+}
+
+(security) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}
+
+(block-sensitive-paths) {
+	@sensitive {
+		path /.env* /.git* /.hg* /.svn* */.env* */.git* */.hg* */.svn*
+		path_regexp sensitiveFiles (?i)(^|/)(docker-compose|compose|config|settings|secrets?|env)\.(ya?ml|json|js|ini|conf)$
+	}
+	respond @sensitive 404
+}
+
+alanet.ru, account.alanet.ru {
+	import security
+	import block-sensitive-paths
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+api.alanet.ru {
+	import security
+	import block-sensitive-paths
+	encode zstd gzip
+	reverse_proxy api:8000
+}
+
+panel.alanet.ru {
+	import security
+	import block-sensitive-paths
+	header X-Robots-Tag "noindex, nofollow, noarchive"
+	encode zstd gzip
+	reverse_proxy remnawave:3000
+}
+
+sub.alanet.ru {
+	import security
+	import block-sensitive-paths
+	encode zstd gzip
+	reverse_proxy remnawave-subscription-page:3010 {
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host {host}
+	}
+}

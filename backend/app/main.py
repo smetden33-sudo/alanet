@@ -22,6 +22,8 @@ async def health() -> dict[str, str]:
 
 @app.post("/api/v1/checkout", response_model=CheckoutResponse, status_code=status.HTTP_201_CREATED)
 async def checkout(data: CheckoutRequest, session: AsyncSession = Depends(get_session)) -> CheckoutResponse:
+    if not settings.yookassa_enabled:
+        raise HTTPException(status_code=503, detail="payment integration is not configured")
     try:
         order, url = await create_checkout(session, settings, plan_slug=data.plan_slug, email=str(data.email), telegram_username=data.telegram_username)
     except ValueError as exc:
@@ -34,6 +36,8 @@ async def checkout(data: CheckoutRequest, session: AsyncSession = Depends(get_se
 
 @app.post("/webhooks/yookassa")
 async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get_session)) -> dict[str, str]:
+    if not settings.yookassa_enabled:
+        raise HTTPException(status_code=503, detail="payment integration is not configured")
     payload = await request.json()
     try:
         result = await accept_yookassa_webhook(session, settings, payload)

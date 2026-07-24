@@ -1,0 +1,91 @@
+name: alanet
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: https://api.alanet.ru
+        NEXT_PUBLIC_SITE_URL: https://account.alanet.ru
+        NEXT_PUBLIC_CHECKOUT_ENABLED: "false"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+
+  billing-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: billing
+      POSTGRES_USER: billing
+      POSTGRES_PASSWORD: ${BILLING_DB_PASSWORD}
+    volumes:
+      - billing-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billing -d billing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
+  billing-redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+  api:
+    build: ../backend
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      billing-db:
+        condition: service_healthy
+      billing-redis:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8000:8000"
+    command: ["sh", "-c", "alembic upgrade head && python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1"]
+    networks:
+      - default
+      - remnawave-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - default
+      - remnawave-network
+
+volumes:
+  billing-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  remnawave-network:
+    external: true

@@ -1,0 +1,18 @@
+services:
+  remnawave-subscription-page:
+    image: remnawave/subscription-page:latest
+    container_name: remnawave-subscription-page
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:3010:3010"
+    networks:
+      - remnawave-network
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+
+networks:
+  remnawave-network:
+    external: true
