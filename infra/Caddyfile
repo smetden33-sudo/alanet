@@ -1,0 +1,35 @@
+{
+	email {$ACME_EMAIL}
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+(security) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+}
+
+{$API_DOMAIN} {
+	import security
+	encode zstd gzip
+	reverse_proxy api:8000
+}
+
+{$PANEL_DOMAIN} {
+	import security
+	@blocked not path /your-secret-login-route*
+	respond @blocked 404
+	reverse_proxy {$PANEL_UPSTREAM}
+}
+
+{$SUB_DOMAIN} {
+	import security
+	encode zstd gzip
+	reverse_proxy {$SUB_UPSTREAM}
+}

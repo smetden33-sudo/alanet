@@ -1,0 +1,71 @@
+name: quiet-network
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: billing
+      POSTGRES_USER: billing
+      POSTGRES_PASSWORD: ${BILLING_DB_PASSWORD}
+    volumes:
+      - billing_data:/var/lib/postgresql/data
+    networks: [private]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billing -d billing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks: [private]
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_started}
+    networks: [private, edge]
+    expose: ["8000"]
+    command: ["sh", "-c", "alembic upgrade head && python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=*"]
+
+  worker:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    depends_on: [api, redis]
+    networks: [private]
+    command: ["celery", "-A", "app.worker.celery", "worker", "-B", "--loglevel=INFO"]
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      ACCOUNT_DOMAIN: ${ACCOUNT_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      PANEL_DOMAIN: ${PANEL_DOMAIN}
+      PANEL_UPSTREAM: ${PANEL_UPSTREAM}
+      SUB_DOMAIN: ${SUB_DOMAIN}
+      SUB_UPSTREAM: ${SUB_UPSTREAM}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+
+networks:
+  edge:
+  private:
+    internal: true
+volumes:
+  billing_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
