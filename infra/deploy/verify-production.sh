@@ -25,9 +25,12 @@ check_http subscription "${subscription_url}" 200
 check_http sensitive_path https://alanet.ru/.env 404
 
 nodes_json="$(curl --fail --silent --show-error "${auth[@]}" https://panel.alanet.ru/api/nodes)"
-node_connected="$(jq -r '(.response | if type == "array" then . else (.nodes // []) end)[] | select(.name == "ALANET-RU-1") | .isConnected' <<<"${nodes_json}")"
-printf 'node_connected=%s\n' "${node_connected}"
-[[ "${node_connected}" == "true" ]]
+primary_node_connected="$(jq -r '(.response | if type == "array" then . else (.nodes // []) end)[] | select(.address == "172.18.0.1" or .address == "78.17.54.252") | .isConnected' <<<"${nodes_json}" | head -n1)"
+shared_node_connected="$(jq -r '(.response | if type == "array" then . else (.nodes // []) end)[] | select(.address == "132.243.228.206") | .isConnected' <<<"${nodes_json}" | head -n1)"
+printf 'primary_node_connected=%s\n' "${primary_node_connected}"
+printf 'shared_node_connected=%s\n' "${shared_node_connected}"
+[[ "${primary_node_connected}" == "true" ]]
+[[ "${shared_node_connected}" == "true" ]]
 
 curl --fail --silent --show-error \
   --user-agent 'v2rayN/7.0' \
@@ -47,6 +50,8 @@ grep -q 'sni=alanet.ru' /tmp/alanet-client-subscription.decoded
 grep -q 'fp=firefox' /tmp/alanet-client-subscription.decoded
 grep -q 'flow=xtls-rprx-vision' /tmp/alanet-client-subscription.decoded
 grep -q 'sid=6ba85179e30d4fc2' /tmp/alanet-client-subscription.decoded
+grep -q '@132.243.228.206:2053' /tmp/alanet-client-subscription.decoded
+grep -q 'sni=iv.okcdn.ru' /tmp/alanet-client-subscription.decoded
 printf 'vless_subscription=valid\n'
 
 ss -ltn | grep -q ':443 '

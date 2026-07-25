@@ -1,0 +1,18 @@
+services:
+  remnanode-alanet:
+    container_name: ${NODE_CONTAINER_NAME:-remnanode-alanet}
+    hostname: ${NODE_HOSTNAME:-alanet-node}
+    image: remnawave/node:latest
+    network_mode: host
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    environment:
+      - NODE_PORT=${NODE_PORT:-2222}
+      - SECRET_KEY=${SECRET_KEY}
+    mem_limit: ${NODE_MEMORY_LIMIT:-256m}
+    pids_limit: ${NODE_PIDS_LIMIT:-256}
