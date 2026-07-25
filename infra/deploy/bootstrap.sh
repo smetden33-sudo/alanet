@@ -46,7 +46,6 @@ ufw default allow outgoing
 ufw allow 22/tcp comment 'SSH'
 ufw allow 80/tcp comment 'HTTP ACME'
 ufw allow 443/tcp comment 'HTTPS'
-ufw allow 8443/tcp comment 'VLESS Reality'
 ufw --force enable
 
 cat >/etc/sysctl.d/99-alanet.conf <<'EOF'

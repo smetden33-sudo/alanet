@@ -28,9 +28,9 @@ if [[ -z "${host_uuid}" ]]; then
       },
       remark: "ALANET-RU-1",
       address: "78.17.54.252",
-      port: 8443,
-      sni: "www.microsoft.com",
-      fingerprint: "chrome",
+      port: 443,
+      sni: "alanet.ru",
+      fingerprint: "firefox",
       isDisabled: false,
       isHidden: false,
       serverDescription: "ALANET Russia",
@@ -38,6 +38,18 @@ if [[ -z "${host_uuid}" ]]; then
     }' > /tmp/alanet-host.json
   host_response="$(curl --fail --silent --show-error -X POST "${json_auth[@]}" --data-binary @/tmp/alanet-host.json https://panel.alanet.ru/api/hosts)"
   host_uuid="$(jq -r '.response.uuid' <<<"${host_response}")"
+else
+  jq -n \
+    --arg host_uuid "${host_uuid}" \
+    '{
+      uuid: $host_uuid,
+      port: 443,
+      sni: "alanet.ru",
+      fingerprint: "firefox"
+    }' > /tmp/alanet-host.json
+  curl --fail --silent --show-error -X PATCH "${json_auth[@]}" \
+    --data-binary @/tmp/alanet-host.json \
+    https://panel.alanet.ru/api/hosts >/dev/null
 fi
 
 squads_json="$(curl --fail --silent --show-error "${auth[@]}" https://panel.alanet.ru/api/internal-squads)"

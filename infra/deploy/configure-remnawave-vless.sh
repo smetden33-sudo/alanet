@@ -18,11 +18,12 @@ jq -n \
       inbounds: [
         {
           tag: "VLESS_TCP_REALITY",
-          port: 8443,
+          port: 443,
           listen: "0.0.0.0",
           protocol: "vless",
           settings: {
             clients: [],
+            flow: "xtls-rprx-vision",
             decryption: "none"
           },
           sniffing: {
@@ -34,10 +35,10 @@ jq -n \
             network: "raw",
             security: "reality",
             realitySettings: {
-              target: "www.microsoft.com:443",
-              shortIds: [""],
+              target: "127.0.0.1:9443",
+              shortIds: ["6ba85179e30d4fc2"],
               privateKey: $private_key,
-              serverNames: ["www.microsoft.com"]
+              serverNames: ["alanet.ru"]
             }
           }
         }

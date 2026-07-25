@@ -41,12 +41,16 @@ else
 fi
 
 grep -q 'vless://' /tmp/alanet-client-subscription.decoded
-grep -q '@78.17.54.252:8443' /tmp/alanet-client-subscription.decoded
+grep -q '@78.17.54.252:443' /tmp/alanet-client-subscription.decoded
 grep -q 'security=reality' /tmp/alanet-client-subscription.decoded
+grep -q 'sni=alanet.ru' /tmp/alanet-client-subscription.decoded
+grep -q 'fp=firefox' /tmp/alanet-client-subscription.decoded
+grep -q 'flow=xtls-rprx-vision' /tmp/alanet-client-subscription.decoded
+grep -q 'sid=6ba85179e30d4fc2' /tmp/alanet-client-subscription.decoded
 printf 'vless_subscription=valid\n'
 
-ss -ltn | grep -q ':8443 '
-printf 'xray_listener=8443\n'
+ss -ltn | grep -q ':443 '
+printf 'xray_listener=443\n'
 
 for container in \
   alanet-web-1 alanet-api-1 alanet-caddy-1 \
