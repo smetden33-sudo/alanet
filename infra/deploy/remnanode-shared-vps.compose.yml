@@ -5,8 +5,8 @@ services:
     image: remnawave/node:latest
     network_mode: host
     restart: always
-    cap_add:
-      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
     ulimits:
       nofile:
         soft: 1048576
@@ -15,4 +15,5 @@ services:
       - NODE_PORT=${NODE_PORT:-2222}
       - SECRET_KEY=${SECRET_KEY}
     mem_limit: ${NODE_MEMORY_LIMIT:-256m}
+    cpus: ${NODE_CPU_LIMIT:-0.75}
     pids_limit: ${NODE_PIDS_LIMIT:-256}
