@@ -9,7 +9,7 @@ PLANS = [
     {"slug": "start", "name": "Старт", "duration_days": 30, "traffic_limit_bytes": 0, "device_limit": 1, "price_rub": Decimal("299.00")},
     {"slug": "calm", "name": "Спокойно", "duration_days": 90, "traffic_limit_bytes": 0, "device_limit": 1, "price_rub": Decimal("749.00")},
     {"slug": "year", "name": "На год", "duration_days": 365, "traffic_limit_bytes": 0, "device_limit": 1, "price_rub": Decimal("2490.00")},
-    {"slug": "trial", "name": "Тестовый доступ", "duration_days": 1, "traffic_limit_bytes": 0, "device_limit": 1, "price_rub": Decimal("0.00"), "is_active": False},
+    {"slug": "trial", "name": "Пробный", "duration_days": 1, "traffic_limit_bytes": 0, "device_limit": 1, "price_rub": Decimal("0.00"), "is_active": True},
 ]
 
 
@@ -21,9 +21,10 @@ async def seed() -> None:
             if plan:
                 for key, value in values.items():
                     setattr(plan, key, value)
-                plan.remnawave_squad_id = settings.remnawave_squad_id
+                plan.remnawave_squad_id = settings.remnawave_trial_squad_id if values["slug"] == "trial" else settings.remnawave_squad_id
             else:
-                session.add(Plan(**values, remnawave_squad_id=settings.remnawave_squad_id))
+                squad_id = settings.remnawave_trial_squad_id if values["slug"] == "trial" else settings.remnawave_squad_id
+                session.add(Plan(**values, remnawave_squad_id=squad_id))
         await session.commit()
 
 

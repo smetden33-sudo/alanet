@@ -1,5 +1,4 @@
 import structlog
-from hmac import compare_digest
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -72,6 +71,10 @@ async def answer_callback(callback: CallbackQuery, text: str, **kwargs) -> None:
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext) -> None:
     await state.clear()
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) == 2 and args[1].strip().lower() == "trial":
+        await send_trial(message)
+        return
     await message.answer(
         "ALANET — быстрый и безопасный доступ в интернет.\n\n"
         "Выберите тариф, получите ссылку подключения и используйте её на своих устройствах.",
@@ -85,32 +88,16 @@ async def cancel(message: Message, state: FSMContext) -> None:
     await message.answer("Оформление отменено.", reply_markup=main_menu())
 
 
-@router.message(Command("test"))
-async def test_access(message: Message) -> None:
-    supplied = (message.text or "").split(maxsplit=1)
-    expected = settings.telegram_test_code.get_secret_value()
-    if not expected or len(supplied) != 2 or not compare_digest(supplied[1].strip(), expected):
-        await message.answer("Тестовый доступ сейчас недоступен.")
-        return
-    telegram_id = message.from_user.id if message.from_user else None
-    if telegram_id is None:
-        return
-    telegram_username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else None
+async def issue_trial(telegram_id: int, telegram_username: str | None) -> tuple[Subscription | None, str]:
     async with SessionLocal() as session:
         customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id))
         if customer:
             current = await session.scalar(select(Subscription).where(Subscription.customer_id == customer.id))
             if current:
-                await message.answer("Для этого Telegram-аккаунта доступ уже создан.")
-                return
-        claim = await session.scalar(select(AuditLog).where(AuditLog.action == "telegram_test_claim").limit(1))
-        if claim:
-            await message.answer("Тестовый доступ уже выдан.")
-            return
-        plan = await session.scalar(select(Plan).where(Plan.slug == "trial"))
+                return current, "Для этого Telegram-аккаунта ключ уже был создан. Откройте раздел «Моя подписка»."
+        plan = await session.scalar(select(Plan).where(Plan.slug == "trial", Plan.is_active.is_(True)))
         if not plan:
-            await message.answer("Тестовый доступ временно недоступен.")
-            return
+            return None, "Пробный тариф временно недоступен."
         if not customer:
             customer = Customer(email=f"telegram-{telegram_id}@test.alanet.ru", telegram_id=telegram_id, telegram_username=telegram_username)
             session.add(customer)
@@ -123,12 +110,26 @@ async def test_access(message: Message) -> None:
         except Exception:
             log.exception("telegram_test_provisioning_failed", telegram_id=telegram_id)
             await session.rollback()
-            await message.answer("Не удалось создать тестовый доступ. Попробуйте ещё раз позже.")
-            return
+            return None, "Не удалось создать пробный доступ. Попробуйте ещё раз позже."
         session.add(AuditLog(actor=f"telegram:{telegram_id}", action="telegram_test_claim", entity="subscription", entity_id=str(subscription.id), details={"username": telegram_username}))
         await session.commit()
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть подписку", url=subscription.subscription_url)]])
-    await message.answer("Тестовый доступ создан на 24 часа. Ссылка персональная — не передавайте её другим.", reply_markup=keyboard)
+    return subscription, "Пробный доступ создан на 24 часа. В подписке доступна одна локация — ALANET-CZ-1."
+
+
+async def send_trial(message: Message) -> None:
+    if not message.from_user:
+        return
+    username = f"@{message.from_user.username}" if message.from_user.username else None
+    subscription, text = await issue_trial(message.from_user.id, username)
+    keyboard = None
+    if subscription:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть подписку", url=subscription.subscription_url)]])
+    await message.answer(text, reply_markup=keyboard)
+
+
+@router.message(Command("test"))
+async def test_access(message: Message) -> None:
+    await send_trial(message)
 
 
 @router.callback_query(F.data == "menu")
@@ -148,7 +149,7 @@ async def buy(callback: CallbackQuery) -> None:
         return
     await answer_callback(
         callback,
-        "Выберите тариф. Доступ включает все доступные серверы ALANET:",
+        "Выберите тариф. Платные планы включают все серверы ALANET, пробный — только ALANET-CZ-1:",
         reply_markup=plans_menu(plans),
     )
 
@@ -160,6 +161,19 @@ async def select_plan(callback: CallbackQuery, state: FSMContext) -> None:
         plan = await session.scalar(select(Plan).where(Plan.slug == slug, Plan.is_active.is_(True)))
     if not plan:
         await answer_callback(callback, "Этот тариф больше недоступен. Выберите другой.")
+        return
+    if plan.slug == "trial":
+        username = f"@{callback.from_user.username}" if callback.from_user.username else None
+        subscription, text = await issue_trial(callback.from_user.id, username)
+        keyboard = main_menu()
+        if subscription:
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="Открыть подписку", url=subscription.subscription_url)],
+                    [InlineKeyboardButton(text="Главное меню", callback_data="menu")],
+                ]
+            )
+        await answer_callback(callback, text, reply_markup=keyboard)
         return
     if not settings.yookassa_enabled:
         await answer_callback(

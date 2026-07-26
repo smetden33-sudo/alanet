@@ -1,7 +1,8 @@
 const plans = [
-  { name: "Старт", price: "299", period: "30 дней", traffic: "Безлимитный", devices: "1 устройство" },
-  { name: "Спокойно", price: "749", period: "90 дней", traffic: "Безлимитный", devices: "1 устройство", featured: true },
-  { name: "На год", price: "2 490", period: "365 дней", traffic: "Безлимитный", devices: "1 устройство" },
+  { name: "Пробный", price: "0", period: "24 часа", traffic: "Безлимитный", devices: "1 устройство", locations: "Только ALANET-CZ-1", href: "https://t.me/alanet_bot?start=trial" },
+  { name: "Старт", price: "299", period: "30 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации" },
+  { name: "Спокойно", price: "749", period: "90 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации", featured: true },
+  { name: "На год", price: "2 490", period: "365 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации" },
 ];
 
 export default function Home() {
@@ -38,12 +39,12 @@ export default function Home() {
       </section>
 
       <section className="plans-section" id="plans"><div className="shell">
-        <div className="section-heading"><div><p className="section-index">02 / ТАРИФЫ</p><h2>Выберите свой ритм</h2></div><p>Все тарифы включают одинаковую скорость, поддержку и доступ ко всем локациям.</p></div>
+        <div className="section-heading"><div><p className="section-index">02 / ТАРИФЫ</p><h2>Выберите свой ритм</h2></div><p>Платные тарифы открывают все локации. Пробный доступ работает на сервере ALANET-CZ-1.</p></div>
         <div className="plans">{plans.map((plan) => (
           <article className={`plan ${plan.featured ? "featured" : ""}`} key={plan.name}>
             {plan.featured && <span className="plan-label">ПОПУЛЯРНЫЙ</span>}<h3>{plan.name}</h3><div className="price"><b>{plan.price}</b><span>₽</span></div><p>{plan.period}</p>
-            <ul><li>{plan.traffic === "Безлимитный" ? "Безлимитный трафик" : `${plan.traffic} трафика`}</li><li>{plan.devices}</li><li>Все доступные локации</li><li>Поддержка в Telegram</li></ul>
-            <a className={`button ${plan.featured ? "button-light" : "button-outline"}`} href={`/checkout?plan=${encodeURIComponent(plan.name)}`}>Выбрать</a>
+            <ul><li>{plan.traffic === "Безлимитный" ? "Безлимитный трафик" : `${plan.traffic} трафика`}</li><li>{plan.devices}</li><li>{plan.locations}</li><li>Поддержка в Telegram</li></ul>
+            <a className={`button ${plan.featured ? "button-light" : "button-outline"}`} href={plan.href ?? `/checkout?plan=${encodeURIComponent(plan.name)}`}>Выбрать</a>
           </article>
         ))}</div>
         <p className="plan-note">Продление только вручную — никаких неожиданных списаний.</p>

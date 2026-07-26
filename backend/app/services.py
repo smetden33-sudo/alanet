@@ -112,7 +112,15 @@ async def provision_order(session: AsyncSession, settings: Settings, order_id: u
     expiry = extended_expiry(subscription.expires_at if subscription else None, plan.duration_days)
     client = RemnawaveClient(settings)
     if subscription:
-        await client.extend_subscription(subscription.remnawave_user_id, expiry)
+        await client.update_user(
+            subscription.remnawave_user_id,
+            user_uuid=str(subscription.remnawave_legacy_uuid) if subscription.remnawave_legacy_uuid else None,
+            expireAt=expiry.isoformat(),
+            status="ACTIVE",
+            trafficLimitBytes=plan.traffic_limit_bytes,
+            hwidDeviceLimit=plan.device_limit,
+            activeInternalSquads=[plan.remnawave_squad_id],
+        )
         subscription.expires_at = expiry
         subscription.status = SubscriptionStatus.ACTIVE
     else:

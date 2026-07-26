@@ -20,6 +20,10 @@ test("server-renders the finished Russian landing page", async () => {
   assert.match(html, /<title>Тихая сеть — простой доступ в интернет<\/title>/i);
   assert.match(html, /Интернет, который/);
   assert.match(html, /Выберите свой ритм/);
+  assert.match(html, /Пробный/);
+  assert.match(html, /24 часа/);
+  assert.match(html, /Только ALANET-CZ-1/);
+  assert.match(html, /t\.me\/alanet_bot\?start=trial/);
   assert.match(html, /\/checkout\?plan=/);
   assert.match(html, /property="og:image"/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);

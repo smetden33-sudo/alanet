@@ -38,11 +38,12 @@ class RemnawaveClient:
     async def get_user_by_username(self, username: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/users/by-username/{username}")
 
-    async def update_user(self, user_id: int, **changes: Any) -> dict[str, Any]:
-        return await self._request("PATCH", "/api/users", json={"id": user_id, **changes})
+    async def update_user(self, user_id: int, *, user_uuid: str | None = None, **changes: Any) -> dict[str, Any]:
+        identifier = {"uuid": user_uuid} if user_uuid else {"id": user_id}
+        return await self._request("PATCH", "/api/users", json={**identifier, **changes})
 
-    async def extend_subscription(self, user_id: int, expire_at: datetime) -> dict[str, Any]:
-        return await self.update_user(user_id, expireAt=expire_at.isoformat(), status="ACTIVE")
+    async def extend_subscription(self, user_id: int, expire_at: datetime, *, user_uuid: str | None = None) -> dict[str, Any]:
+        return await self.update_user(user_id, user_uuid=user_uuid, expireAt=expire_at.isoformat(), status="ACTIVE")
 
     async def enable_user(self, user_id: int) -> dict[str, Any]:
         return await self._request("POST", f"/api/users/{user_id}/actions/enable")
