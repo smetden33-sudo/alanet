@@ -1,5 +1,5 @@
 const plans = [
-  { name: "Старт", price: "299", period: "30 дней", traffic: "100 ГБ", devices: "2 устройства" },
+  { name: "Старт", price: "299", period: "30 дней", traffic: "Безлимитный", devices: "1 устройство" },
   { name: "Спокойно", price: "749", period: "90 дней", traffic: "300 ГБ", devices: "3 устройства", featured: true },
   { name: "На год", price: "2 490", period: "365 дней", traffic: "1 ТБ", devices: "5 устройств" },
 ];
@@ -25,7 +25,7 @@ export default function Home() {
           <div className="signal-top"><span>Статус подключения</span><span className="status-dot">активно</span></div>
           <div className="orb" aria-hidden="true"><div className="orb-core">✓</div></div>
           <strong>Всё работает</strong><p>Москва · 38 мс</p>
-          <div className="usage"><div><span>Использовано</span><b>18,4 ГБ</b></div><div className="usage-track"><span /></div><small>из 100 ГБ · ещё 24 дня</small></div>
+          <div className="usage"><div><span>Использовано</span><b>18,4 ГБ</b></div><div className="usage-track"><span /></div><small>безлимитный трафик · ещё 24 дня</small></div>
         </div>
       </section>
 
@@ -42,7 +42,7 @@ export default function Home() {
         <div className="plans">{plans.map((plan) => (
           <article className={`plan ${plan.featured ? "featured" : ""}`} key={plan.name}>
             {plan.featured && <span className="plan-label">ПОПУЛЯРНЫЙ</span>}<h3>{plan.name}</h3><div className="price"><b>{plan.price}</b><span>₽</span></div><p>{plan.period}</p>
-            <ul><li>{plan.traffic} трафика</li><li>{plan.devices}</li><li>Все доступные локации</li><li>Поддержка в Telegram</li></ul>
+            <ul><li>{plan.traffic === "Безлимитный" ? "Безлимитный трафик" : `${plan.traffic} трафика`}</li><li>{plan.devices}</li><li>Все доступные локации</li><li>Поддержка в Telegram</li></ul>
             <a className={`button ${plan.featured ? "button-light" : "button-outline"}`} href={`/checkout?plan=${encodeURIComponent(plan.name)}`}>Выбрать</a>
           </article>
         ))}</div>
