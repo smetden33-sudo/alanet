@@ -56,8 +56,9 @@ async def telegram_webhook(request: Request) -> dict[str, bool]:
     expected = settings.telegram_webhook_secret.get_secret_value()
     if not expected or supplied != expected:
         raise HTTPException(status_code=403, detail="forbidden")
-    from .telegram import bot, dispatcher
+    from .telegram import dispatcher, get_bot
     from aiogram.types import Update
+    bot = get_bot()
     update = Update.model_validate(await request.json(), context={"bot": bot})
     await dispatcher.feed_update(bot, update)
     return {"ok": True}

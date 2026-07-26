@@ -15,11 +15,26 @@ def extended_expiry(current: datetime | None, duration_days: int, now: datetime 
     return base + timedelta(days=duration_days)
 
 
-async def create_checkout(session: AsyncSession, settings: Settings, *, plan_slug: str, email: str, telegram_username: str | None) -> tuple[Order, str]:
+async def create_checkout(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    plan_slug: str,
+    email: str,
+    telegram_username: str | None,
+    telegram_id: int | None = None,
+) -> tuple[Order, str]:
     plan = await session.scalar(select(Plan).where(Plan.slug == plan_slug, Plan.is_active.is_(True)))
     if not plan:
         raise ValueError("unknown plan")
-    customer = Customer(email=email, telegram_username=telegram_username)
+    customer = None
+    if telegram_id is not None:
+        customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id))
+    if customer:
+        customer.email = email
+        customer.telegram_username = telegram_username
+    else:
+        customer = Customer(email=email, telegram_username=telegram_username, telegram_id=telegram_id)
     order = Order(customer=customer, plan=plan, amount=plan.price_rub, status=OrderStatus.CREATED)
     key = str(uuid.uuid4())
     session.add_all([customer, order])
