@@ -34,7 +34,7 @@ export default function CheckoutPage() {
         <p className="section-index">СКОРО</p>
         <h2>Оплата пока закрыта</h2>
         <p>Мы заканчиваем подключение платёжной системы. Сейчас деньги не принимаются и заказы не создаются.</p>
-        <a className="button" href="https://t.me/your_support">Узнать о запуске в Telegram →</a>
+        <a className="button" href="https://t.me/alanet_bot">Узнать о запуске в Telegram →</a>
       </section>}
     </div>
   </main>;

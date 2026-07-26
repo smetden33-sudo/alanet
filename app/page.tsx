@@ -60,7 +60,7 @@ export default function Home() {
         <div><a className="brand brand-light" href="#top"><span className="brand-mark">Т</span><span>тихая сеть</span></a><p>Связь без лишнего шума.</p></div>
         <div><b>Сервис</b><a href="#plans">Тарифы</a><a href="/checkout">Личный кабинет</a><a href="#how">Инструкции</a></div>
         <div><b>Документы</b><a href="/offer">Оферта</a><a href="/privacy">Конфиденциальность</a><a href="/refund">Возвраты</a></div>
-        <div><b>Поддержка</b><a href="https://t.me/your_support">Telegram</a><a href="mailto:help@example.com">help@example.com</a></div>
+        <div><b>Поддержка</b><a href="https://t.me/alanet_bot">Telegram</a><a href="mailto:help@alanet.ru">help@alanet.ru</a></div>
       </div><div className="shell footer-bottom"><span>© 2026 Тихая сеть</span><span>Оплата защищена ЮKassa</span></div></footer>
     </main>
   );
