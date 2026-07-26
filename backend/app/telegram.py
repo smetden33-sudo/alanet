@@ -1,4 +1,5 @@
 import structlog
+from hmac import compare_digest
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -9,8 +10,8 @@ from sqlalchemy import select
 
 from .config import get_settings
 from .db import SessionLocal
-from .models import Customer, Plan, Subscription
-from .services import create_checkout
+from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription
+from .services import create_checkout, provision_order
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -82,6 +83,52 @@ async def start(message: Message, state: FSMContext) -> None:
 async def cancel(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer("Оформление отменено.", reply_markup=main_menu())
+
+
+@router.message(Command("test"))
+async def test_access(message: Message) -> None:
+    supplied = (message.text or "").split(maxsplit=1)
+    expected = settings.telegram_test_code.get_secret_value()
+    if not expected or len(supplied) != 2 or not compare_digest(supplied[1].strip(), expected):
+        await message.answer("Тестовый доступ сейчас недоступен.")
+        return
+    telegram_id = message.from_user.id if message.from_user else None
+    if telegram_id is None:
+        return
+    telegram_username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else None
+    async with SessionLocal() as session:
+        customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id))
+        if customer:
+            current = await session.scalar(select(Subscription).where(Subscription.customer_id == customer.id))
+            if current:
+                await message.answer("Для этого Telegram-аккаунта доступ уже создан.")
+                return
+        claim = await session.scalar(select(AuditLog).where(AuditLog.action == "telegram_test_claim").limit(1))
+        if claim:
+            await message.answer("Тестовый доступ уже выдан.")
+            return
+        plan = await session.scalar(select(Plan).where(Plan.slug == "trial"))
+        if not plan:
+            await message.answer("Тестовый доступ временно недоступен.")
+            return
+        if not customer:
+            customer = Customer(email=f"telegram-{telegram_id}@test.alanet.ru", telegram_id=telegram_id, telegram_username=telegram_username)
+            session.add(customer)
+            await session.flush()
+        order = Order(customer_id=customer.id, plan_id=plan.id, amount=plan.price_rub, status=OrderStatus.PROVISIONING)
+        session.add(order)
+        await session.flush()
+        try:
+            subscription = await provision_order(session, settings, order.id)
+        except Exception:
+            log.exception("telegram_test_provisioning_failed", telegram_id=telegram_id)
+            await session.rollback()
+            await message.answer("Не удалось создать тестовый доступ. Попробуйте ещё раз позже.")
+            return
+        session.add(AuditLog(actor=f"telegram:{telegram_id}", action="telegram_test_claim", entity="subscription", entity_id=str(subscription.id), details={"username": telegram_username}))
+        await session.commit()
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть подписку", url=subscription.subscription_url)]])
+    await message.answer("Тестовый доступ создан на 24 часа. Ссылка персональная — не передавайте её другим.", reply_markup=keyboard)
 
 
 @router.callback_query(F.data == "menu")

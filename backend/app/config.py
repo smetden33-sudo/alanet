@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     remnawave_squad_id: str = ""
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_webhook_secret: SecretStr = SecretStr("")
+    telegram_test_code: SecretStr = SecretStr("")
     telegram_admin_chat_id: int | None = None
 
     @field_validator("telegram_admin_chat_id", mode="before")
