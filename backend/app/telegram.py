@@ -113,7 +113,7 @@ async def issue_trial(telegram_id: int, telegram_username: str | None) -> tuple[
             return None, "Не удалось создать пробный доступ. Попробуйте ещё раз позже."
         session.add(AuditLog(actor=f"telegram:{telegram_id}", action="telegram_test_claim", entity="subscription", entity_id=str(subscription.id), details={"username": telegram_username}))
         await session.commit()
-    return subscription, "Пробный доступ создан на 24 часа. В подписке доступен 1 сервер."
+    return subscription, "Пробный доступ создан на 24 часа. В подписке доступна 1 локация."
 
 
 async def send_trial(message: Message) -> None:
@@ -149,7 +149,7 @@ async def buy(callback: CallbackQuery) -> None:
         return
     await answer_callback(
         callback,
-        "Выберите тариф. Платные планы включают все серверы ALANET, пробный — 1 сервер:",
+        "Выберите тариф. Платные планы включают все серверы ALANET, пробный — 1 локация:",
         reply_markup=plans_menu(plans),
     )
 
