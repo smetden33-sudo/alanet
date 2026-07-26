@@ -17,7 +17,7 @@ export default function Home() {
         <div className="hero-copy">
           <p className="eyebrow"><span /> Простой доступ без сложных настроек</p>
           <h1>Интернет, который<br />не отвлекает.</h1>
-          <p className="hero-lead">Одно подключение для телефона и компьютера. Быстрый старт, понятный личный кабинет и поддержка, которая отвечает по-человечески.</p>
+        <p className="hero-lead">Одно подключение для телефона или компьютера. Быстрый старт, понятный личный кабинет и поддержка, которая отвечает по-человечески.</p>
           <div className="hero-actions"><a className="button" href="#plans">Выбрать тариф <span aria-hidden="true">→</span></a><a className="text-link" href="#how">Как это работает <span aria-hidden="true">↘</span></a></div>
           <div className="trust-row" aria-label="Преимущества сервиса"><span>Без автосписаний</span><span>Оплата через ЮKassa</span><span>Запуск за 3 минуты</span></div>
         </div>
