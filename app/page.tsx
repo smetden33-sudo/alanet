@@ -1,5 +1,5 @@
 const plans = [
-  { name: "Пробный", price: "0", period: "24 часа", traffic: "Безлимитный", devices: "1 устройство", locations: "Только ALANET-CZ-1", href: "https://t.me/alanet_bot?start=trial" },
+  { name: "Пробный", price: "0", period: "24 часа", traffic: "Безлимитный", devices: "1 устройство", locations: "1 сервер", href: "https://t.me/alanet_bot?start=trial" },
   { name: "Старт", price: "299", period: "30 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации" },
   { name: "Спокойно", price: "749", period: "90 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации", featured: true },
   { name: "На год", price: "2 490", period: "365 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации" },
@@ -39,7 +39,7 @@ export default function Home() {
       </section>
 
       <section className="plans-section" id="plans"><div className="shell">
-        <div className="section-heading"><div><p className="section-index">02 / ТАРИФЫ</p><h2>Выберите свой ритм</h2></div><p>Платные тарифы открывают все локации. Пробный доступ работает на сервере ALANET-CZ-1.</p></div>
+        <div className="section-heading"><div><p className="section-index">02 / ТАРИФЫ</p><h2>Выберите свой ритм</h2></div><p>Платные тарифы открывают все локации. Пробный доступ работает на 1 сервере.</p></div>
         <div className="plans">{plans.map((plan) => (
           <article className={`plan ${plan.featured ? "featured" : ""}`} key={plan.name}>
             {plan.featured && <span className="plan-label">ПОПУЛЯРНЫЙ</span>}<h3>{plan.name}</h3><div className="price"><b>{plan.price}</b><span>₽</span></div><p>{plan.period}</p>

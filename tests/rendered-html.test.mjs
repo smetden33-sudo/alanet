@@ -22,7 +22,7 @@ test("server-renders the finished Russian landing page", async () => {
   assert.match(html, /Выберите свой ритм/);
   assert.match(html, /Пробный/);
   assert.match(html, /24 часа/);
-  assert.match(html, /Только ALANET-CZ-1/);
+  assert.match(html, /1 сервер/);
   assert.match(html, /t\.me\/alanet_bot\?start=trial/);
   assert.match(html, /\/checkout\?plan=/);
   assert.match(html, /property="og:image"/);
