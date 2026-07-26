@@ -7,7 +7,7 @@ from .models import Plan
 
 PLANS = [
     {"slug": "start", "name": "Старт", "duration_days": 30, "traffic_limit_bytes": 0, "device_limit": 1, "price_rub": Decimal("299.00")},
-    {"slug": "calm", "name": "Спокойно", "duration_days": 90, "traffic_limit_bytes": 300 * 1024**3, "device_limit": 3, "price_rub": Decimal("749.00")},
+    {"slug": "calm", "name": "Спокойно", "duration_days": 90, "traffic_limit_bytes": 0, "device_limit": 1, "price_rub": Decimal("749.00")},
     {"slug": "year", "name": "На год", "duration_days": 365, "traffic_limit_bytes": 1024 * 1024**3, "device_limit": 5, "price_rub": Decimal("2490.00")},
 ]
 
