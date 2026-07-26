@@ -38,6 +38,10 @@ class RemnawaveClient:
     async def get_user_by_username(self, username: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/users/by-username/{username}")
 
+    async def list_nodes(self) -> list[dict[str, Any]]:
+        response = await self._request("GET", "/api/nodes")
+        return response if isinstance(response, list) else response.get("nodes", [])
+
     async def update_user(self, user_id: int, *, user_uuid: str | None = None, **changes: Any) -> dict[str, Any]:
         identifier = {"uuid": user_uuid} if user_uuid else {"id": user_id}
         return await self._request("PATCH", "/api/users", json={**identifier, **changes})

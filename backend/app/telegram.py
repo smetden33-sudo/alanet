@@ -5,12 +5,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from .config import get_settings
 from .db import SessionLocal
-from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription
-from .services import create_checkout, provision_order
+from .integrations.remnawave import RemnawaveClient
+from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription, SubscriptionStatus
+from .services import create_checkout, extended_expiry, provision_order
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -130,6 +131,235 @@ async def send_trial(message: Message) -> None:
 @router.message(Command("test"))
 async def test_access(message: Message) -> None:
     await send_trial(message)
+
+
+def is_admin(message: Message) -> bool:
+    return bool(
+        message.from_user
+        and settings.telegram_admin_chat_id is not None
+        and message.from_user.id == settings.telegram_admin_chat_id
+    )
+
+
+async def require_admin(message: Message) -> bool:
+    if is_admin(message):
+        return True
+    await message.answer("Команда доступна только администратору.")
+    return False
+
+
+def command_args(message: Message) -> list[str]:
+    return (message.text or "").split()[1:]
+
+
+async def find_customer(session, target: str) -> Customer | None:
+    conditions = [Customer.telegram_username.ilike(target)]
+    if target.isdigit():
+        conditions.append(Customer.telegram_id == int(target))
+    if "@" in target or "." in target:
+        conditions.append(Customer.email.ilike(target))
+    return await session.scalar(select(Customer).where(or_(*conditions)))
+
+
+def customer_label(customer: Customer) -> str:
+    return customer.telegram_username or str(customer.telegram_id or customer.email)
+
+
+@router.message(Command("admin"))
+async def admin_menu(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await message.answer(
+        "Административное меню\n\n"
+        "/stats — статистика клиентов и подписок\n"
+        "/user <telegram_id|@username|email> — карточка клиента\n"
+        "/grant <telegram_id> <trial|start|calm|year> — выдать тариф\n"
+        "/extend <telegram_id> <дни> — продлить подписку\n"
+        "/revoke <telegram_id> — отозвать подписку\n"
+        "/nodes — состояние нод Remnawave\n"
+        "/orders — последние заказы"
+    )
+
+
+@router.message(Command("stats"))
+async def admin_stats(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    async with SessionLocal() as session:
+        customers = await session.scalar(select(func.count()).select_from(Customer))
+        active = await session.scalar(select(func.count()).select_from(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE))
+        orders = await session.scalar(select(func.count()).select_from(Order))
+        paid = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.ACTIVE, Order.amount > 0))
+    await message.answer(
+        f"Статистика\n\nКлиентов: {customers}\nАктивных подписок: {active}\nВсего заказов: {orders}\nАктивных платных заказов: {paid}"
+    )
+
+
+@router.message(Command("user"))
+async def admin_user(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    args = command_args(message)
+    if len(args) != 1:
+        await message.answer("Использование: /user <telegram_id|@username|email>")
+        return
+    async with SessionLocal() as session:
+        customer = await find_customer(session, args[0])
+        if not customer:
+            await message.answer("Клиент не найден.")
+            return
+        subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == customer.id))
+        last_order = await session.scalar(select(Order).where(Order.customer_id == customer.id).order_by(Order.created_at.desc()))
+    lines = [
+        f"Клиент: {customer_label(customer)}",
+        f"Telegram ID: {customer.telegram_id or '—'}",
+        f"Email: {customer.email}",
+        f"Статус: {customer.status.value}",
+    ]
+    if subscription:
+        lines.extend([
+            f"Подписка: {subscription.status.value}",
+            f"Действует до: {subscription.expires_at.astimezone().strftime('%d.%m.%Y %H:%M')}",
+            f"Ссылка: {subscription.subscription_url}",
+            f"Remnawave ID: {subscription.remnawave_user_id}",
+        ])
+    else:
+        lines.append("Подписка: отсутствует")
+    if last_order:
+        lines.append(f"Последний заказ: {last_order.status.value}, {last_order.amount:.2f} ₽")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("grant"))
+async def admin_grant(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    args = command_args(message)
+    if len(args) != 2:
+        await message.answer("Использование: /grant <telegram_id> <trial|start|calm|year>")
+        return
+    target, slug = args
+    if not target.isdigit():
+        await message.answer("Для выдачи нужен числовой Telegram ID.")
+        return
+    telegram_id = int(target)
+    async with SessionLocal() as session:
+        customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id))
+        plan = await session.scalar(select(Plan).where(Plan.slug == slug, Plan.is_active.is_(True)))
+        if not plan:
+            await message.answer("Активный тариф не найден.")
+            return
+        if not customer:
+            customer = Customer(email=f"telegram-{telegram_id}@admin.alanet.ru", telegram_id=telegram_id)
+            session.add(customer)
+            await session.flush()
+        order = Order(customer_id=customer.id, plan_id=plan.id, amount=0, status=OrderStatus.PROVISIONING)
+        session.add(order)
+        await session.flush()
+        try:
+            subscription = await provision_order(session, settings, order.id)
+        except Exception:
+            log.exception("admin_grant_failed", telegram_id=telegram_id, plan=slug)
+            await session.rollback()
+            await message.answer("Не удалось выдать тариф. Подробности записаны в журнал.")
+            return
+        session.add(AuditLog(actor=f"admin:{message.from_user.id}", action="admin_grant", entity="subscription", entity_id=str(subscription.id), details={"telegram_id": telegram_id, "plan": slug}))
+        await session.commit()
+    await message.answer(f"Тариф {plan.name} выдан клиенту {telegram_id} до {subscription.expires_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n{subscription.subscription_url}")
+
+
+@router.message(Command("extend"))
+async def admin_extend(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    args = command_args(message)
+    if len(args) != 2 or not args[0].isdigit() or not args[1].isdigit():
+        await message.answer("Использование: /extend <telegram_id> <дни>")
+        return
+    days = int(args[1])
+    if days < 1 or days > 3650:
+        await message.answer("Количество дней должно быть от 1 до 3650.")
+        return
+    async with SessionLocal() as session:
+        customer = await session.scalar(select(Customer).where(Customer.telegram_id == int(args[0])))
+        subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == customer.id)) if customer else None
+        if not subscription:
+            await message.answer("Активная подписка не найдена.")
+            return
+        expiry = extended_expiry(subscription.expires_at, days)
+        try:
+            await RemnawaveClient(settings).update_user(subscription.remnawave_user_id, user_uuid=str(subscription.remnawave_legacy_uuid) if subscription.remnawave_legacy_uuid else None, expireAt=expiry.isoformat(), status="ACTIVE")
+        except Exception:
+            log.exception("admin_extend_failed", telegram_id=args[0])
+            await message.answer("Не удалось продлить подписку в Remnawave.")
+            return
+        subscription.expires_at = expiry
+        subscription.status = SubscriptionStatus.ACTIVE
+        session.add(AuditLog(actor=f"admin:{message.from_user.id}", action="admin_extend", entity="subscription", entity_id=str(subscription.id), details={"days": days}))
+        await session.commit()
+    await message.answer(f"Подписка продлена до {expiry.astimezone().strftime('%d.%m.%Y %H:%M')}.")
+
+
+@router.message(Command("revoke"))
+async def admin_revoke(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    args = command_args(message)
+    if len(args) != 1 or not args[0].isdigit():
+        await message.answer("Использование: /revoke <telegram_id>")
+        return
+    async with SessionLocal() as session:
+        customer = await session.scalar(select(Customer).where(Customer.telegram_id == int(args[0])))
+        subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == customer.id)) if customer else None
+        if not subscription:
+            await message.answer("Подписка не найдена.")
+            return
+        try:
+            await RemnawaveClient(settings).revoke_subscription(subscription.remnawave_user_id)
+        except Exception:
+            log.exception("admin_revoke_failed", telegram_id=args[0])
+            await message.answer("Не удалось отозвать пользователя в Remnawave.")
+            return
+        subscription.status = SubscriptionStatus.DISABLED
+        session.add(AuditLog(actor=f"admin:{message.from_user.id}", action="admin_revoke", entity="subscription", entity_id=str(subscription.id), details={}))
+        await session.commit()
+    await message.answer("Подписка отозвана, пользователь отключён в Remnawave.")
+
+
+@router.message(Command("nodes"))
+async def admin_nodes(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    try:
+        nodes = await RemnawaveClient(settings).list_nodes()
+    except Exception:
+        log.exception("admin_nodes_failed")
+        await message.answer("Не удалось получить состояние нод Remnawave.")
+        return
+    if not nodes:
+        await message.answer("Ноды не найдены.")
+        return
+    lines = ["Ноды Remnawave:"]
+    for node in nodes:
+        state = "подключена" if node.get("isConnected") else "не подключена"
+        lines.append(f"{node.get('name', '—')}: {state}, {node.get('countryCode') or '—'}")
+    await message.answer("\n".join(lines))
+
+
+@router.message(Command("orders"))
+async def admin_orders(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    async with SessionLocal() as session:
+        rows = (await session.execute(select(Order, Plan, Customer).join(Plan, Plan.id == Order.plan_id).join(Customer, Customer.id == Order.customer_id).order_by(Order.created_at.desc()).limit(10))).all()
+    if not rows:
+        await message.answer("Заказов пока нет.")
+        return
+    lines = ["Последние заказы:"]
+    for order, plan, customer in rows:
+        created = order.created_at.astimezone().strftime("%d.%m %H:%M") if order.created_at else "—"
+        lines.append(f"{created} · {customer_label(customer)} · {plan.name} · {order.status.value} · {order.amount:.2f} ₽")
+    await message.answer("\n".join(lines))
 
 
 @router.callback_query(F.data == "menu")
