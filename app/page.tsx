@@ -1,7 +1,7 @@
 const plans = [
   { name: "Старт", price: "299", period: "30 дней", traffic: "Безлимитный", devices: "1 устройство" },
   { name: "Спокойно", price: "749", period: "90 дней", traffic: "Безлимитный", devices: "1 устройство", featured: true },
-  { name: "На год", price: "2 490", period: "365 дней", traffic: "1 ТБ", devices: "5 устройств" },
+  { name: "На год", price: "2 490", period: "365 дней", traffic: "Безлимитный", devices: "1 устройство" },
 ];
 
 export default function Home() {
