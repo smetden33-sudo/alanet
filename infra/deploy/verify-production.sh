@@ -33,7 +33,7 @@ webhook_url="$(jq -r '.result.url // empty' <<<"${webhook_json}")"
 printf 'telegram_webhook=200\n'
 
 nodes_json="$(curl --fail --silent --show-error "${auth[@]}" https://panel.alanet.ru/api/nodes)"
-for node_name in ALANET-FIN-01 ALANET-DE-1 ALANET-CZ-1; do
+for node_name in ALANET-FIN-01 ALANET-DE-1 ALANET-CZ-1 ALANET-SE-1; do
   connected="$(jq -r --arg name "${node_name}" '(.response | if type == "array" then . else (.nodes // []) end) | map(select(.name == $name))[0].isConnected // false' <<<"${nodes_json}")"
   printf '%s_connected=%s\n' "${node_name,,}" "${connected}"
   [[ "${connected}" == "true" ]]

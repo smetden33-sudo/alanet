@@ -40,7 +40,7 @@ All domains use Caddy-managed Let's Encrypt certificates. Sensitive paths are bl
 
 ## Subscription model
 
-The billing database stores one `Customer` and one `Subscription` per Telegram account. Each `Plan` stores duration, traffic, devices and a Remnawave internal squad UUID.
+The billing database stores one `Customer` and one `Subscription` per Telegram account. Each `Plan` stores duration, traffic, devices and a Remnawave internal squad UUID. Paid subscriptions currently resolve to Finland, Germany, Czechia and Sweden; trial subscriptions remain restricted to Czechia.
 
 - `trial`: 1 day, unlimited, 1 device, `TRIAL-CZ`.
 - `start`: 30 days, unlimited, 1 device, `PAID-USERS`.
