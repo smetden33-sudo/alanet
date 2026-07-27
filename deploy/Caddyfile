@@ -47,6 +47,8 @@ sub.alanet.ru {
 	import security
 	import block-sensitive-paths
 	encode zstd gzip
+	@root path /
+	respond @root 404
 	reverse_proxy remnawave-subscription-page:3010 {
 		header_up X-Forwarded-Proto https
 		header_up X-Forwarded-Host {host}

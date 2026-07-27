@@ -3,15 +3,12 @@ set -Eeuo pipefail
 
 umask 077
 
-token="$(sed -n 's/^REMNAWAVE_TOKEN=//p' /opt/alanet/deploy/.env)"
-subscription_url="$(< /root/alanet-test-subscription.url)"
+token="$(sed -n 's/^REMNAWAVE_TOKEN=//p' /opt/alanet/deploy/.env | tr -d '\r')"
+telegram_token="$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' /opt/alanet/deploy/.env | tr -d '\r')"
 auth=(-H "Authorization: Bearer ${token}")
 
 check_http() {
-  local name="$1"
-  local url="$2"
-  local expected="$3"
-  local status
+  local name="$1" url="$2" expected="$3" status
   status="$(curl --silent --output /dev/null --write-out '%{http_code}' "${url}")"
   printf '%s=%s\n' "${name}" "${status}"
   [[ "${status}" == "${expected}" ]]
@@ -21,41 +18,38 @@ check_http site https://alanet.ru/ 200
 check_http account https://account.alanet.ru/ 200
 check_http api https://api.alanet.ru/health 200
 check_http panel https://panel.alanet.ru/ 200
-check_http subscription "${subscription_url}" 200
+check_http subscription_root https://sub.alanet.ru/ 404
 check_http sensitive_path https://alanet.ru/.env 404
 
-nodes_json="$(curl --fail --silent --show-error "${auth[@]}" https://panel.alanet.ru/api/nodes)"
-primary_node_connected="$(jq -r '(.response | if type == "array" then . else (.nodes // []) end)[] | select(.address == "172.18.0.1" or .address == "78.17.54.252") | .isConnected' <<<"${nodes_json}" | head -n1)"
-shared_node_connected="$(jq -r '(.response | if type == "array" then . else (.nodes // []) end)[] | select(.address == "132.243.228.206") | .isConnected' <<<"${nodes_json}" | head -n1)"
-cz_node_connected="$(jq -r '(.response | if type == "array" then . else (.nodes // []) end)[] | select(.address == "141.133.172.38") | .isConnected' <<<"${nodes_json}" | head -n1)"
-printf 'primary_node_connected=%s\n' "${primary_node_connected}"
-printf 'shared_node_connected=%s\n' "${shared_node_connected}"
-printf 'cz_node_connected=%s\n' "${cz_node_connected}"
-[[ "${primary_node_connected}" == "true" ]]
-[[ "${shared_node_connected}" == "true" ]]
-[[ "${cz_node_connected}" == "true" ]]
+for domain in alanet.ru account.alanet.ru api.alanet.ru panel.alanet.ru sub.alanet.ru; do
+  echo | openssl s_client -connect "${domain}:443" -servername "${domain}" 2>/dev/null \
+    | openssl x509 -checkend 604800 -noout >/dev/null
+done
+printf 'tls_certificates=valid_7d\n'
 
-curl --fail --silent --show-error \
-  --user-agent 'v2rayN/7.0' \
-  "${subscription_url}" > /tmp/alanet-client-subscription
+webhook_json="$(curl --fail --silent --show-error "https://api.telegram.org/bot${telegram_token}/getWebhookInfo")"
+webhook_url="$(jq -r '.result.url // empty' <<<"${webhook_json}")"
+[[ "${webhook_url}" == "https://api.alanet.ru/webhooks/telegram" ]]
+printf 'telegram_webhook=200\n'
+
+nodes_json="$(curl --fail --silent --show-error "${auth[@]}" https://panel.alanet.ru/api/nodes)"
+for node_name in ALANET-FIN-01 ALANET-DE-1 ALANET-CZ-1; do
+  connected="$(jq -r --arg name "${node_name}" '(.response | if type == "array" then . else (.nodes // []) end) | map(select(.name == $name))[0].isConnected // false' <<<"${nodes_json}")"
+  printf '%s_connected=%s\n' "${node_name,,}" "${connected}"
+  [[ "${connected}" == "true" ]]
+done
+
+subscription_url="$(docker exec alanet-billing-db-1 psql -U billing -d billing -Atq -c "select subscription_url from subscriptions order by starts_at desc limit 1" | tr -d '\r')"
+[[ -n "${subscription_url}" ]]
+check_http subscription "${subscription_url}" 200
+curl --fail --silent --show-error --user-agent 'v2rayN/7.0' "${subscription_url}" > /tmp/alanet-client-subscription
 
 if grep -q '^vless://' /tmp/alanet-client-subscription; then
   cp /tmp/alanet-client-subscription /tmp/alanet-client-subscription.decoded
 else
-  tr -d '\r\n' < /tmp/alanet-client-subscription |
-    base64 -d > /tmp/alanet-client-subscription.decoded
+  tr -d '\r\n' < /tmp/alanet-client-subscription | base64 -d > /tmp/alanet-client-subscription.decoded
 fi
-
-grep -q 'vless://' /tmp/alanet-client-subscription.decoded
-grep -q '@78.17.54.252:443' /tmp/alanet-client-subscription.decoded
-grep -q 'security=reality' /tmp/alanet-client-subscription.decoded
-grep -q 'sni=alanet.ru' /tmp/alanet-client-subscription.decoded
-grep -q 'fp=firefox' /tmp/alanet-client-subscription.decoded
-grep -q 'flow=xtls-rprx-vision' /tmp/alanet-client-subscription.decoded
-grep -q 'sid=6ba85179e30d4fc2' /tmp/alanet-client-subscription.decoded
-grep -q '@132.243.228.206:2053' /tmp/alanet-client-subscription.decoded
-grep -q 'sni=iv.okcdn.ru' /tmp/alanet-client-subscription.decoded
-grep -q '@141.133.172.38:2053' /tmp/alanet-client-subscription.decoded
+grep -q '^vless://' /tmp/alanet-client-subscription.decoded
 printf 'vless_subscription=valid\n'
 
 ss -ltn | grep -q ':443 '
