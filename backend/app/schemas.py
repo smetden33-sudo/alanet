@@ -15,3 +15,7 @@ class CheckoutResponse(BaseModel):
 
 class BindTelegramRequest(BaseModel):
     token: str = Field(min_length=32, max_length=128)
+
+
+class TelegramSessionExchangeRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=160)

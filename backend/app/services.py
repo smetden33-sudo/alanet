@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import Settings
 from .integrations.remnawave import RemnawaveClient
 from .integrations.yookassa import YooKassaClient
-from .models import Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus, TelegramBindToken, WebhookEvent
+from .models import Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus, TelegramBindToken, WebLoginToken, WebSession, WebhookEvent
 
 
 def normalize_email(email: str) -> str:
@@ -17,6 +17,47 @@ def normalize_email(email: str) -> str:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+async def create_web_login_link(session: AsyncSession, customer_id: uuid.UUID, settings: Settings) -> str:
+    token = secrets.token_urlsafe(32)
+    session.add(WebLoginToken(
+        customer_id=customer_id,
+        token_hash=_token_hash(token),
+        expires_at=datetime.now(UTC) + timedelta(minutes=15),
+    ))
+    await session.flush()
+    return f"{settings.public_site_url.rstrip('/')}/account?session={token}"
+
+
+async def exchange_web_login_token(session: AsyncSession, token: str, settings: Settings) -> tuple[str, Customer]:
+    login = await session.scalar(select(WebLoginToken).where(WebLoginToken.token_hash == _token_hash(token)).with_for_update())
+    now = datetime.now(UTC)
+    if not login or login.consumed_at or login.expires_at <= now:
+        raise ValueError("login token is invalid or expired")
+    customer = await session.get(Customer, login.customer_id, with_for_update=True)
+    if not customer or customer.status.value != "ACTIVE":
+        raise ValueError("customer is not active")
+    session_token = secrets.token_urlsafe(48)
+    session.add(WebSession(
+        customer_id=customer.id,
+        token_hash=_token_hash(session_token),
+        expires_at=now + timedelta(days=settings.session_ttl_days),
+    ))
+    login.consumed_at = now
+    await session.flush()
+    return session_token, customer
+
+
+async def get_web_session(session: AsyncSession, token: str) -> tuple[WebSession, Customer] | None:
+    current = datetime.now(UTC)
+    web_session = await session.scalar(select(WebSession).where(WebSession.token_hash == _token_hash(token)).with_for_update())
+    if not web_session or web_session.revoked_at or web_session.expires_at <= current:
+        return None
+    customer = await session.get(Customer, web_session.customer_id)
+    if not customer or customer.status.value != "ACTIVE":
+        return None
+    return web_session, customer
 
 
 async def create_telegram_bind_token(session: AsyncSession, customer_id: uuid.UUID, settings: Settings) -> str:
