@@ -17,7 +17,9 @@ export default function CheckoutPage() {
     try {
       const response = await fetch(`${API_URL}/api/v1/checkout`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan_slug:String(data.get("plan")),email:String(data.get("email")),telegram_username:String(data.get("telegram")??"")})});
       if (!response.ok) throw new Error("checkout failed");
-      const result = await response.json(); window.location.assign(result.confirmation_url);
+      const result = await response.json();
+      if (result.telegram_bind_url) window.sessionStorage.setItem("alanet_telegram_bind_url", result.telegram_bind_url);
+      window.location.assign(result.confirmation_url);
     } catch { setStatus("error"); setMessage("Сервис оплаты пока недоступен. Попробуйте ещё раз или напишите в поддержку."); }
   }
   return <main className="checkout-page">

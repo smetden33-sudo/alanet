@@ -1,12 +1,60 @@
 import uuid
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import Settings
 from .integrations.remnawave import RemnawaveClient
 from .integrations.yookassa import YooKassaClient
-from .models import Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus, WebhookEvent
+from .models import Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus, TelegramBindToken, WebhookEvent
+
+
+def normalize_email(email: str) -> str:
+    return email.strip().casefold()
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("ascii")).hexdigest()
+
+
+async def create_telegram_bind_token(session: AsyncSession, customer_id: uuid.UUID, settings: Settings) -> str:
+    token = secrets.token_urlsafe(32)
+    session.add(TelegramBindToken(
+        customer_id=customer_id,
+        token_hash=_token_hash(token),
+        expires_at=datetime.now(UTC) + timedelta(days=7),
+    ))
+    await session.flush()
+    username = settings.telegram_bot_username.lstrip("@").strip()
+    return f"https://t.me/{username}?start=bind_{token}"
+
+
+async def bind_telegram_token(session: AsyncSession, token: str, telegram_id: int, telegram_username: str | None) -> Customer:
+    row = await session.scalar(select(TelegramBindToken).where(TelegramBindToken.token_hash == _token_hash(token)).with_for_update())
+    if not row or row.consumed_at or row.expires_at <= datetime.now(UTC):
+        raise ValueError("bind token is invalid or expired")
+    customer = await session.get(Customer, row.customer_id, with_for_update=True)
+    if not customer:
+        raise ValueError("customer not found")
+    existing = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id).with_for_update())
+    if existing and existing.id != customer.id:
+        existing_subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == existing.id).with_for_update())
+        target_subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == customer.id).with_for_update())
+        if existing_subscription and target_subscription:
+            raise ValueError("telegram account is already linked to another customer")
+        orders = (await session.scalars(select(Order).where(Order.customer_id == existing.id))).all()
+        for order in orders:
+            order.customer_id = customer.id
+        if existing_subscription:
+            existing_subscription.customer_id = customer.id
+        await session.execute(delete(TelegramBindToken).where(TelegramBindToken.customer_id == existing.id))
+        await session.delete(existing)
+    customer.telegram_id = telegram_id
+    customer.telegram_username = telegram_username
+    row.consumed_at = datetime.now(UTC)
+    return customer
 
 
 def extended_expiry(current: datetime | None, duration_days: int, now: datetime | None = None) -> datetime:
@@ -23,13 +71,16 @@ async def create_checkout(
     email: str,
     telegram_username: str | None,
     telegram_id: int | None = None,
-) -> tuple[Order, str]:
+) -> tuple[Order, str, str | None]:
     plan = await session.scalar(select(Plan).where(Plan.slug == plan_slug, Plan.is_active.is_(True)))
     if not plan:
         raise ValueError("unknown plan")
+    email = normalize_email(email)
     customer = None
     if telegram_id is not None:
-        customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id))
+        customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id).with_for_update())
+    if not customer:
+        customer = await session.scalar(select(Customer).where(func.lower(Customer.email) == email).with_for_update())
     if customer:
         customer.email = email
         customer.telegram_username = telegram_username
@@ -47,7 +98,11 @@ async def create_checkout(
     payment.raw_payload = result
     order.status = OrderStatus.PAYMENT_PENDING
     await session.commit()
-    return order, result["confirmation"]["confirmation_url"]
+    bind_url = None
+    if customer.telegram_id is None:
+        bind_url = await create_telegram_bind_token(session, customer.id, settings)
+        await session.commit()
+    return order, result["confirmation"]["confirmation_url"], bind_url
 
 
 async def accept_yookassa_webhook(session: AsyncSession, settings: Settings, payload: dict) -> str:

@@ -11,7 +11,7 @@ from .config import get_settings
 from .db import SessionLocal
 from .integrations.remnawave import RemnawaveClient
 from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription, SubscriptionStatus
-from .services import create_checkout, extended_expiry, provision_order
+from .services import bind_telegram_token, create_checkout, extended_expiry, provision_order
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -73,6 +73,18 @@ async def answer_callback(callback: CallbackQuery, text: str, **kwargs) -> None:
 async def start(message: Message, state: FSMContext) -> None:
     await state.clear()
     args = (message.text or "").split(maxsplit=1)
+    if len(args) == 2 and args[1].strip().lower().startswith("bind_"):
+        if not message.from_user:
+            return
+        try:
+            async with SessionLocal() as session:
+                customer = await bind_telegram_token(session, args[1].strip()[5:], message.from_user.id, f"@{message.from_user.username}" if message.from_user.username else None)
+                session.add(AuditLog(actor=f"telegram:{message.from_user.id}", action="telegram_bind", entity="customer", entity_id=str(customer.id), details={"username": customer.telegram_username}))
+                await session.commit()
+            await message.answer("Telegram успешно привязан к вашему аккаунту. Теперь подписка будет отображаться в разделе «Моя подписка».", reply_markup=main_menu())
+        except ValueError as exc:
+            await message.answer("Ссылка привязки недействительна или уже использована. Если вы уже покупали доступ, обратитесь в поддержку.", reply_markup=main_menu())
+        return
     if len(args) == 2 and args[1].strip().lower() == "trial":
         await send_trial(message)
         return
@@ -435,7 +447,7 @@ async def checkout_email(message: Message, state: FSMContext) -> None:
     telegram_username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else None
     try:
         async with SessionLocal() as session:
-            order, confirmation_url = await create_checkout(
+            order, confirmation_url, _bind_url = await create_checkout(
                 session,
                 settings,
                 plan_slug=slug,

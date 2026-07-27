@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     remnawave_trial_squad_id: str = ""
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_webhook_secret: SecretStr = SecretStr("")
+    telegram_bot_username: str = "alanet_bot"
     telegram_admin_chat_id: int | None = None
 
     @field_validator("telegram_admin_chat_id", mode="before")

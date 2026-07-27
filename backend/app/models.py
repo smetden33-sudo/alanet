@@ -43,6 +43,9 @@ class Customer(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+Index("uq_customers_email_lower", func.lower(Customer.email), unique=True)
+
+
 class Plan(Base):
     __tablename__ = "plans"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -104,6 +107,17 @@ class WebhookEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     processing_status: Mapped[str] = mapped_column(String(40), default="RECEIVED")
+
+
+class TelegramBindToken(Base):
+    __tablename__ = "telegram_bind_tokens"
+    __table_args__ = (UniqueConstraint("token_hash"),)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customers.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class AuditLog(Base):

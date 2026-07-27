@@ -25,13 +25,13 @@ async def checkout(data: CheckoutRequest, session: AsyncSession = Depends(get_se
     if not settings.yookassa_enabled:
         raise HTTPException(status_code=503, detail="payment integration is not configured")
     try:
-        order, url = await create_checkout(session, settings, plan_slug=data.plan_slug, email=str(data.email), telegram_username=data.telegram_username)
+        order, url, bind_url = await create_checkout(session, settings, plan_slug=data.plan_slug, email=str(data.email), telegram_username=data.telegram_username)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception:
         log.exception("checkout_failed")
         raise HTTPException(status_code=503, detail="payment provider unavailable")
-    return CheckoutResponse(order_id=str(order.id), confirmation_url=url)
+    return CheckoutResponse(order_id=str(order.id), confirmation_url=url, telegram_bind_url=bind_url)
 
 
 @app.post("/webhooks/yookassa")

@@ -10,6 +10,7 @@ class CheckoutRequest(BaseModel):
 class CheckoutResponse(BaseModel):
     order_id: str
     confirmation_url: str
+    telegram_bind_url: str | None = None
 
 
 class BindTelegramRequest(BaseModel):
