@@ -27,7 +27,7 @@ async def create_web_login_link(session: AsyncSession, customer_id: uuid.UUID, s
         expires_at=datetime.now(UTC) + timedelta(minutes=15),
     ))
     await session.flush()
-    return f"{settings.public_site_url.rstrip('/')}/account?session={token}"
+    return f"{settings.public_site_url.rstrip('/')}/checkout/success?session={token}"
 
 
 async def exchange_web_login_token(session: AsyncSession, token: str, settings: Settings) -> tuple[str, Customer]:

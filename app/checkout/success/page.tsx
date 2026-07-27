@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import AccountPage from "../../account/page";
 
 export default function CheckoutSuccessPage() {
+  const search = useSearchParams();
   const [bindUrl, setBindUrl] = useState<string | null>(null);
+  if (search.get("session")) return <AccountPage />;
 
   useEffect(() => {
     const value = window.sessionStorage.getItem("alanet_telegram_bind_url");
