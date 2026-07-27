@@ -24,7 +24,7 @@ Inventory checked on 2026-07-27. Credentials, tokens and private keys are intent
 
 | Host | UUID | Address | Inbound | Node |
 | --- | --- | --- | --- | --- |
-| `🇫🇮 Финляндия` | `3d4e5059-d5bb-45ad-80ef-5c84d265ec9f` | `78.17.54.252:443` | `VLESS_TCP_REALITY_FIN_1` | `ALANET-FIN-01` |
+| `🇫🇮 Финляндия` | `3d4e5059-d5bb-45ad-80ef-5c84d265ec9f` | `78.17.54.252:8443` | `VLESS_TCP_REALITY_FIN_1` | `ALANET-FIN-01` |
 | `🇸🇪 Швеция` | `82623a5c-ee0f-4116-b9ff-a4b182f7c26e` | `89.125.243.225:2053` | `VLESS_TCP_REALITY_SE_1` | `ALANET-SE-1` |
 | `Poland` | `ef704276-c89b-446c-84ca-e5a9a4a30aca` | `78.17.154.237:2053` | `VLESS_TCP_REALITY_PL_1` | `ALANET-PL-1` |
 
