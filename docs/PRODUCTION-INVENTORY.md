@@ -19,6 +19,12 @@ Inventory checked on 2026-07-27. Credentials, tokens and private keys are intent
 | `PAID-USERS` | `54e2736b-cf3a-4922-90b3-c1ef3319fc4f` | Paid tariffs | Finland, Germany, Czechia, Sweden |
 | `TRIAL-CZ` | `0b67e804-8f40-4930-bd20-c7a03652bb77` | Trial tariff | Czechia only |
 
+## Remnawave hosts
+
+| Host | UUID | Address | Inbound | Node |
+| --- | --- | --- | --- | --- |
+| `🇸🇪 Швеция` | `82623a5c-ee0f-4116-b9ff-a4b182f7c26e` | `89.125.243.225:2053` | `VLESS_TCP_REALITY_SE_1` | `ALANET-SE-1` |
+
 ## Plans
 
 | Slug | Name | Duration | Traffic | Devices | Squad |

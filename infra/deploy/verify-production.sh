@@ -39,6 +39,10 @@ for node_name in ALANET-FIN-01 ALANET-DE-1 ALANET-CZ-1 ALANET-SE-1; do
   [[ "${connected}" == "true" ]]
 done
 
+hosts_json="$(curl --fail --silent --show-error "${auth[@]}" https://panel.alanet.ru/api/hosts)"
+jq -e '.response[] | select(.address == "89.125.243.225" and .port == 2053 and (.nodes | index("eeddedb1-1144-4e37-93ec-584ea5f8aacf")))' <<<"${hosts_json}" >/dev/null
+printf 'alanet-se-1_host=present\n'
+
 subscription_url="$(docker exec alanet-billing-db-1 psql -U billing -d billing -Atq -c "select subscription_url from subscriptions order by starts_at desc limit 1" | tr -d '\r')"
 [[ -n "${subscription_url}" ]]
 check_http subscription "${subscription_url}" 200
