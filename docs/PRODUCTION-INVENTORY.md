@@ -10,13 +10,14 @@ Inventory checked on 2026-07-27. Credentials, tokens and private keys are intent
 | `ALANET-DE-1` | `5e1f02ec-6ed8-4717-a819-76e60f189a7e` | `132.243.228.206` | DE | connected |
 | `ALANET-CZ-1` | `bc3c365e-5ecf-4950-a05e-b7e5d7350f21` | `141.133.172.38` | CZ | connected |
 | `ALANET-SE-1` | `eeddedb1-1144-4e37-93ec-584ea5f8aacf` | `89.125.243.225` | SE | connected |
+| `ALANET-PL-1` | `329e3229-b142-4d17-9b89-28c39337731e` | `78.17.154.237` | PL | connected |
 
 ## Internal squads
 
 | Name | UUID | Intended use | Accessible nodes |
 | --- | --- | --- | --- |
 | `Default-Squad` | `2190759e-13f9-4462-ab98-8c2e2ce15859` | Remnawave default, not used for plans | none |
-| `PAID-USERS` | `54e2736b-cf3a-4922-90b3-c1ef3319fc4f` | Paid tariffs | Finland, Germany, Czechia, Sweden |
+| `PAID-USERS` | `54e2736b-cf3a-4922-90b3-c1ef3319fc4f` | Paid tariffs | Finland, Germany, Czechia, Sweden, Poland |
 | `TRIAL-CZ` | `0b67e804-8f40-4930-bd20-c7a03652bb77` | Trial tariff | Czechia only |
 
 ## Remnawave hosts
@@ -24,6 +25,7 @@ Inventory checked on 2026-07-27. Credentials, tokens and private keys are intent
 | Host | UUID | Address | Inbound | Node |
 | --- | --- | --- | --- | --- |
 | `🇸🇪 Швеция` | `82623a5c-ee0f-4116-b9ff-a4b182f7c26e` | `89.125.243.225:2053` | `VLESS_TCP_REALITY_SE_1` | `ALANET-SE-1` |
+| `Poland` | `ef704276-c89b-446c-84ca-e5a9a4a30aca` | `78.17.154.237:2053` | `VLESS_TCP_REALITY_PL_1` | `ALANET-PL-1` |
 
 ## Plans
 
@@ -36,6 +38,6 @@ Inventory checked on 2026-07-27. Credentials, tokens and private keys are intent
 
 ## Scheduled operations
 
-- `alanet-healthcheck.timer`: every 5 minutes (more frequent than a daily check); validates domains, API, Telegram webhook, all four nodes, one subscription URL, listener 443 and all 10 containers on the primary VPS.
+- `alanet-healthcheck.timer`: every 5 minutes (more frequent than a daily check); validates domains, API, Telegram webhook, all five nodes, one subscription URL, listener 443 and all 10 containers on the primary VPS.
 - `alanet-backup.timer`: daily at approximately 03:15 UTC with a randomized delay; retains seven days of archives.
 - Health-check output and failures are available through `journalctl -u alanet-healthcheck.service`.
