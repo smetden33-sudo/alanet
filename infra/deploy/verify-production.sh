@@ -33,7 +33,7 @@ webhook_url="$(jq -r '.result.url // empty' <<<"${webhook_json}")"
 printf 'telegram_webhook=200\n'
 
 nodes_json="$(curl --fail --silent --show-error "${auth[@]}" https://panel.alanet.ru/api/nodes)"
-for node_name in ALANET-FIN-01 ALANET-DE-1 ALANET-CZ-1 ALANET-SE-1 ALANET-PL-1; do
+for node_name in ALANET-FIN-01 ALANET-DE-1 ALANET-CZ-1 ALANET-SE-1 ALANET-PL-1 ALANET-ES-1; do
   connected="$(jq -r --arg name "${node_name}" '(.response | if type == "array" then . else (.nodes // []) end) | map(select(.name == $name))[0].isConnected // false' <<<"${nodes_json}")"
   printf '%s_connected=%s\n' "${node_name,,}" "${connected}"
   [[ "${connected}" == "true" ]]
@@ -44,6 +44,8 @@ jq -e '.response[] | select(.address == "89.125.243.225" and .port == 2053 and (
 printf 'alanet-se-1_host=present\n'
 jq -e '.response[] | select(.address == "78.17.154.237" and .port == 2053 and (.nodes | index("329e3229-b142-4d17-9b89-28c39337731e")))' <<<"${hosts_json}" >/dev/null
 printf 'alanet-pl-1_host=present\n'
+jq -e '.response[] | select(.address == "78.17.180.246" and .port == 2053 and (.nodes | index("75ded50a-09b1-4efc-bc68-57a8f21fdd96")))' <<<"${hosts_json}" >/dev/null
+printf 'alanet-es-1_host=present\n'
 
 subscription_url="$(docker exec alanet-billing-db-1 psql -U billing -d billing -Atq -c "select subscription_url from subscriptions order by starts_at desc limit 1" | tr -d '\r')"
 [[ -n "${subscription_url}" ]]
