@@ -36,6 +36,8 @@ The API uses `https://panel.alanet.ru` as its Remnawave base URL. This is requir
 | `panel.alanet.ru` | Remnawave panel |
 | `sub.alanet.ru` | Remnawave subscription page |
 
+YooKassa production is enabled in billing API. The API credentials are stored only in the production `.env`; the `payment.succeeded` notification must be configured in the YooKassa merchant dashboard to `https://api.alanet.ru/webhooks/yookassa`.
+
 All domains use Caddy-managed Let's Encrypt certificates. Sensitive paths are blocked with HTTP 404.
 
 ## Subscription model

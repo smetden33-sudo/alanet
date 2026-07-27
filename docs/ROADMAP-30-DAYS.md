@@ -38,7 +38,7 @@ Production: `alanet.ru`
 - ✅ Telegram-бот: `@alanet_bot`.
 - ✅ Администратор Telegram: ID `6137733861`.
 - ✅ PostgreSQL, Redis, Caddy, Docker Compose и сервисы приложения работают на production.
-- ⛔ ЮKassa отключена до получения production-данных: `YOOKASSA_ENABLED=false`.
+- ✅ ЮKassa production подключена: `YOOKASSA_ENABLED=true`; Shop ID `1419340`. Webhook: `https://api.alanet.ru/webhooks/yookassa`.
 
 ### Ноды Remnawave
 
