@@ -1,6 +1,6 @@
 # ALANET production inventory
 
-Inventory checked on 2026-07-27. Credentials, tokens and private keys are intentionally excluded.
+Inventory checked on 2026-07-28. Credentials, tokens and private keys are intentionally excluded.
 
 ## Remnawave nodes
 
@@ -43,7 +43,7 @@ Inventory checked on 2026-07-27. Credentials, tokens and private keys are intent
 
 ## Scheduled operations
 
-- `alanet-healthcheck.timer`: every 5 minutes (more frequent than a daily check); validates domains, API, Telegram webhook, all seven nodes, one subscription URL, listener 443 and all 11 containers on the primary VPS.
-- `alanet-worker-1`: Celery worker with embedded beat; retries failed provisioning every minute and reconciles pending payment states every five minutes.
+- `alanet-healthcheck.timer`: every 5 minutes; validates domains, API, Telegram webhook, all seven nodes, hosts, one subscription URL, listener 443, resources and all 11 containers. It sends one Telegram alert per incident and a recovery message.
+- `alanet-worker-1`: Celery worker with embedded beat; retries failed provisioning every minute, reconciles payments and subscription lifecycle every five minutes, and sends the daily admin report at 06:00 UTC.
 - `alanet-backup.timer`: daily at approximately 03:15 UTC with a randomized delay; retains seven days of archives.
-- Health-check output and failures are available through `journalctl -u alanet-healthcheck.service`.
+- Docker JSON logs rotate daily at 20 MB, retain seven compressed generations. Health-check output and failures are available through `journalctl -u alanet-healthcheck.service`.
