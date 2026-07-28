@@ -51,12 +51,16 @@ All domains use Caddy-managed Let's Encrypt certificates. Sensitive paths are bl
 
 The billing database stores one `Customer` and one `Subscription` per Telegram account. Each `Plan` stores duration, traffic, devices and a Remnawave internal squad UUID. Paid subscriptions currently resolve to Finland, Germany, Czechia, Sweden, Poland, Spain and Latvia; trial subscriptions remain restricted to Czechia.
 
+Telegram identity is keyed by the immutable numeric `telegram_id`; `@username` is display-only and may change. Billing is the identity bridge: `telegram_id → Customer.id → Subscription.remnawave_user_id`. Remnawave does not authenticate Telegram directly. Its stable technical username is derived from `Customer.id` (`customer_<uuid prefix>`), which avoids exposing Telegram identifiers and remains unchanged when the Telegram username changes. A bot checkout refuses to merge an email that is already linked to another Telegram ID and writes an audit entry when the identity is first registered.
+
 - `trial`: 1 day, unlimited, 1 device, `TRIAL-CZ`.
 - `start`: 30 days, unlimited, 1 device, `PAID-USERS`.
 - `calm`: 90 days, unlimited, 1 device, `PAID-USERS`.
 - `year`: 365 days, unlimited, 1 device, `PAID-USERS`.
 
 On a new subscription the API calls `POST /api/users`. On renewal or plan change it calls `PATCH /api/users` by the stored Remnawave UUID and updates expiry, limits and active internal squads.
+
+On 2026-07-28 this identity chain was verified end-to-end with a new synthetic Telegram client. The first `start` payment created one Customer and one Remnawave user; a second `start` payment with the same Telegram ID but a changed `@username` reused both records and extended the existing expiry by exactly 30 days. An attempted checkout using the same email with another Telegram ID was rejected before payment creation. Live YooKassa credentials were restored after the test.
 
 Failed provisioning is stored as `PROVISIONING_FAILED`. `alanet-worker-1` checks the retry queue every minute and accepts paid orders only when their local payment is confirmed; free trial/admin grants remain eligible without a payment. The target expiry is persisted on the order and reused on every attempt. A PostgreSQL advisory lock serializes webhook, worker and `/retry <order_id>` execution for the same order, so a retry cannot extend an active subscription twice.
 
