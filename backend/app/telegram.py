@@ -13,7 +13,7 @@ from .config import get_settings
 from .db import SessionLocal
 from .integrations.remnawave import RemnawaveClient
 from .models import AdminAction, AuditLog, Customer, Order, OrderStatus, Plan, Subscription, SubscriptionStatus
-from .services import bind_telegram_token, create_checkout, create_web_login_link, extended_expiry, provision_order, retry_failed_provisioning
+from .services import bind_telegram_token, create_checkout, extended_expiry, provision_order, retry_failed_provisioning
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -44,7 +44,6 @@ def main_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Купить подписку", callback_data="buy")],
             [
                 InlineKeyboardButton(text="Моя подписка", callback_data="subscription"),
-                InlineKeyboardButton(text="Личный кабинет", callback_data="account"),
                 InlineKeyboardButton(text="Как подключиться", callback_data="setup"),
             ],
             [InlineKeyboardButton(text="Открыть сайт", url=settings.public_site_url)],
@@ -146,24 +145,6 @@ async def send_trial(message: Message) -> None:
 @router.message(Command("test"))
 async def test_access(message: Message) -> None:
     await send_trial(message)
-
-
-async def send_account_link(message: Message) -> None:
-    if not message.from_user:
-        return
-    async with SessionLocal() as session:
-        customer = await session.scalar(select(Customer).where(Customer.telegram_id == message.from_user.id))
-        if not customer:
-            await message.answer("Сначала получите пробный доступ или оформите подписку, затем кабинет станет доступен.", reply_markup=main_menu())
-            return
-        link = await create_web_login_link(session, customer.id, settings)
-        await session.commit()
-    await message.answer("Ваша защищённая ссылка в личный кабинет действует 15 минут и может быть использована один раз.", reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть личный кабинет", url=link)], [InlineKeyboardButton(text="Главное меню", callback_data="menu")]]))
-
-
-@router.message(Command("account"))
-async def account_command(message: Message) -> None:
-    await send_account_link(message)
 
 
 def is_admin(message: Message) -> bool:
@@ -682,14 +663,6 @@ async def subscription(callback: CallbackQuery) -> None:
         f"Подписка активна до {expires}.\n\nНе пересылайте персональную ссылку другим людям.",
         reply_markup=keyboard,
     )
-
-
-@router.callback_query(F.data == "account")
-async def account_callback(callback: CallbackQuery) -> None:
-    if not callback.message:
-        return
-    await callback.answer()
-    await send_account_link(callback.message)
 
 
 @router.callback_query(F.data == "setup")

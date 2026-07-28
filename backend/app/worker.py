@@ -86,7 +86,7 @@ async def _subscription_lifecycle() -> dict[str, int]:
                 await session.commit()
                 expired_count += 1
                 if customer and customer.telegram_id:
-                    await send_telegram_message(settings, customer.telegram_id, "Срок подписки ALANET закончился. Откройте /account или раздел «Купить подписку», чтобы восстановить доступ.")
+                    await send_telegram_message(settings, customer.telegram_id, "Срок подписки ALANET закончился. Откройте раздел «Купить подписку», чтобы восстановить доступ.")
             except Exception:
                 await session.rollback()
                 log.exception("subscription_expiry_failed subscription_id=%s", subscription_id)
@@ -103,7 +103,7 @@ async def _subscription_lifecycle() -> dict[str, int]:
             if not customer or not customer.telegram_id:
                 continue
             label = "меньше суток" if hours <= 24 else "меньше трёх дней"
-            sent = await send_telegram_message(settings, customer.telegram_id, f"До окончания подписки ALANET осталось {label}. Продлить её можно через /account — новый срок добавится к текущей дате.")
+            sent = await send_telegram_message(settings, customer.telegram_id, f"До окончания подписки ALANET осталось {label}. Продлить её можно через раздел «Купить подписку» — новый срок добавится к текущей дате.")
             if sent:
                 session.add(AuditLog(actor="worker:lifecycle", action=action, entity="subscription", entity_id=str(subscription.id), details={"expires_at": subscription.expires_at.isoformat()}))
                 await session.commit()

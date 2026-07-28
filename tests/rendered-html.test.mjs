@@ -62,3 +62,9 @@ test("account renewal uses the authenticated checkout", async () => {
   assert.match(apiMain, /current_web_customer\(request, session\)/);
   assert.match(schemas, /Literal\["start", "calm", "year"\]/);
 });
+
+test("telegram bot does not expose the web personal cabinet", async () => {
+  const telegram = await readFile(new URL("../backend/app/telegram.py", import.meta.url), "utf8");
+  assert.match(telegram, /Моя подписка/);
+  assert.doesNotMatch(telegram, /Личный кабинет|callback_data=["']account["']|Command\(["']account["']\)/);
+});
