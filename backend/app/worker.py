@@ -5,7 +5,7 @@ from celery import Celery
 from celery.schedules import crontab
 from sqlalchemy import func, select
 from .config import get_settings
-from .db import SessionLocal
+from .db import SessionLocal, engine
 from .integrations.remnawave import RemnawaveClient
 from .integrations.yookassa import YooKassaClient
 from .models import AuditLog, Customer, Order, OrderStatus, Payment, Subscription, SubscriptionStatus
@@ -21,6 +21,17 @@ celery.conf.update(task_serializer="json", accept_content=["json"], result_seria
     "subscription-lifecycle": {"task": "app.worker.subscription_lifecycle", "schedule": 300.0},
     "daily-admin-report": {"task": "app.worker.daily_admin_report", "schedule": crontab(hour=6, minute=0)},
 })
+
+
+def run_async_task(coro):
+    """Run one Celery coroutine without reusing asyncpg connections across event loops."""
+    async def execute():
+        try:
+            return await coro
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(execute())
 
 
 async def _retry_provisioning() -> int:
@@ -78,7 +89,7 @@ async def _subscription_lifecycle() -> dict[str, int]:
                     await send_telegram_message(settings, customer.telegram_id, "Срок подписки ALANET закончился. Откройте /account или раздел «Купить подписку», чтобы восстановить доступ.")
             except Exception:
                 await session.rollback()
-                log.exception("subscription_expiry_failed", subscription_id=subscription_id)
+                log.exception("subscription_expiry_failed subscription_id=%s", subscription_id)
 
         deadline = now + timedelta(hours=72)
         upcoming = list((await session.scalars(select(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE, Subscription.expires_at > now, Subscription.expires_at <= deadline).limit(200))).all())
@@ -119,19 +130,19 @@ async def _daily_admin_report() -> bool:
 
 @celery.task(name="app.worker.retry_provisioning")
 def retry_provisioning() -> int:
-    return asyncio.run(_retry_provisioning())
+    return run_async_task(_retry_provisioning())
 
 
 @celery.task(name="app.worker.reconcile_payments")
 def reconcile_payments() -> int:
-    return asyncio.run(_reconcile_payments())
+    return run_async_task(_reconcile_payments())
 
 
 @celery.task(name="app.worker.subscription_lifecycle")
 def subscription_lifecycle() -> dict[str, int]:
-    return asyncio.run(_subscription_lifecycle())
+    return run_async_task(_subscription_lifecycle())
 
 
 @celery.task(name="app.worker.daily_admin_report")
 def daily_admin_report() -> bool:
-    return asyncio.run(_daily_admin_report())
+    return run_async_task(_daily_admin_report())
