@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
 from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription
+from .notifications import notify_admin
 from .schemas import CheckoutRequest, CheckoutResponse, RenewalCheckoutRequest, TelegramSessionExchangeRequest
 from .services import accept_yookassa_webhook, create_checkout, exchange_web_login_token, get_web_session
 
@@ -121,7 +122,12 @@ async def yookassa_webhook(request: Request, session: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail="invalid notification") from exc
     except Exception:
         log.exception("yookassa_webhook_failed")
+        payment_id = str(payload.get("object", {}).get("id", ""))
+        await notify_admin(settings, f"ALANET: ошибка обработки подтверждённого платежа. Payment ID: {payment_id or 'не указан'}. Заказ сохранён для повторной обработки.")
         raise HTTPException(status_code=503, detail="retry later")
+    if result == "processed":
+        payment_id = str(payload.get("object", {}).get("id", ""))
+        await notify_admin(settings, f"ALANET: платёж успешно обработан и подписка активирована. Payment ID: {payment_id}.")
     return {"status": result}
 
 
