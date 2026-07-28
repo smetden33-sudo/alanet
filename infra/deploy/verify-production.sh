@@ -61,7 +61,7 @@ cpu_count="$(nproc)"
 printf 'resources=disk_%s%%_memory_%s%%_load_%s_cpus_%s\n' "${disk_percent}" "${memory_percent}" "${load_1m}" "${cpu_count}"
 (( disk_percent < 90 ))
 (( memory_percent < 95 ))
-awk -v load="${load_1m}" -v cpus="${cpu_count}" 'BEGIN { exit !(load < cpus * 2) }'
+awk -v load_value="${load_1m}" -v cpus="${cpu_count}" 'BEGIN { exit !(load_value < cpus * 2) }'
 
 webhook_json="$(curl --fail --silent --show-error "https://api.telegram.org/bot${telegram_token}/getWebhookInfo")"
 webhook_url="$(jq -r '.result.url // empty' <<<"${webhook_json}")"
