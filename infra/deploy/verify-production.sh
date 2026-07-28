@@ -5,7 +5,34 @@ umask 077
 
 token="$(sed -n 's/^REMNAWAVE_TOKEN=//p' /opt/alanet/deploy/.env | tr -d '\r')"
 telegram_token="$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' /opt/alanet/deploy/.env | tr -d '\r')"
+telegram_admin_chat_id="$(sed -n 's/^TELEGRAM_ADMIN_CHAT_ID=//p' /opt/alanet/deploy/.env | tr -d '\r')"
 auth=(-H "Authorization: Bearer ${token}")
+monitor_state_dir="/var/lib/alanet-monitor"
+monitor_state_file="${monitor_state_dir}/health.state"
+mkdir -p "${monitor_state_dir}"
+
+send_alert() {
+  local message="$1"
+  [[ -n "${telegram_token}" && -n "${telegram_admin_chat_id}" ]] || return 0
+  curl --silent --show-error --max-time 15 \
+    --data-urlencode "chat_id=${telegram_admin_chat_id}" \
+    --data-urlencode "text=${message}" \
+    "https://api.telegram.org/bot${telegram_token}/sendMessage" >/dev/null || true
+}
+
+on_error() {
+  local exit_code="$?" line="$1" previous
+  trap - ERR
+  set +e
+  previous="$(cat "${monitor_state_file}" 2>/dev/null || true)"
+  if [[ "${previous}" != "failed" ]]; then
+    send_alert "ALANET: health-check обнаружил сбой на строке ${line}. Повторные одинаковые оповещения подавлены до восстановления."
+  fi
+  printf 'failed\n' > "${monitor_state_file}"
+  rm -f /tmp/alanet-client-subscription /tmp/alanet-client-subscription.decoded
+  exit "${exit_code}"
+}
+trap 'on_error ${LINENO}' ERR
 
 check_http() {
   local name="$1" url="$2" expected="$3" status
@@ -26,6 +53,15 @@ for domain in alanet.ru account.alanet.ru api.alanet.ru panel.alanet.ru sub.alan
     | openssl x509 -checkend 604800 -noout >/dev/null
 done
 printf 'tls_certificates=valid_7d\n'
+
+disk_percent="$(df -P / | awk 'NR==2 {gsub(/%/, "", $5); print $5}')"
+memory_percent="$(free | awk '/^Mem:/ {printf "%d", ($3/$2)*100}')"
+load_1m="$(awk '{print $1}' /proc/loadavg)"
+cpu_count="$(nproc)"
+printf 'resources=disk_%s%%_memory_%s%%_load_%s_cpus_%s\n' "${disk_percent}" "${memory_percent}" "${load_1m}" "${cpu_count}"
+(( disk_percent < 90 ))
+(( memory_percent < 95 ))
+awk -v load="${load_1m}" -v cpus="${cpu_count}" 'BEGIN { exit !(load < cpus * 2) }'
 
 webhook_json="$(curl --fail --silent --show-error "https://api.telegram.org/bot${telegram_token}/getWebhookInfo")"
 webhook_url="$(jq -r '.result.url // empty' <<<"${webhook_json}")"
@@ -76,3 +112,9 @@ done
 printf 'containers=11/11\n'
 
 rm -f /tmp/alanet-client-subscription /tmp/alanet-client-subscription.decoded
+
+previous_state="$(cat "${monitor_state_file}" 2>/dev/null || true)"
+printf 'ok\n' > "${monitor_state_file}"
+if [[ "${previous_state}" == "failed" ]]; then
+  send_alert "ALANET: health-check снова проходит, сервисы восстановлены."
+fi

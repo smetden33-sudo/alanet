@@ -16,11 +16,20 @@ export default function CheckoutPage() {
     const data = new FormData(event.currentTarget);
     try {
       const response = await fetch(`${API_URL}/api/v1/checkout`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan_slug:String(data.get("plan")),email:String(data.get("email")),telegram_username:String(data.get("telegram")??"")})});
-      if (!response.ok) throw new Error("checkout failed");
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.detail || "checkout failed");
+      }
       const result = await response.json();
       if (result.telegram_bind_url) window.sessionStorage.setItem("alanet_telegram_bind_url", result.telegram_bind_url);
       window.location.assign(result.confirmation_url);
-    } catch { setStatus("error"); setMessage("Сервис оплаты пока недоступен. Попробуйте ещё раз или напишите в поддержку."); }
+    } catch (error) {
+      setStatus("error");
+      const detail = error instanceof Error ? error.message : "";
+      if (detail.includes("different customers") || detail.includes("another telegram")) setMessage("Email уже связан с другим Telegram-аккаунтом. Напишите в поддержку, чтобы безопасно объединить данные.");
+      else if (detail.includes("too many requests")) setMessage("Слишком много попыток. Подождите минуту и попробуйте снова.");
+      else setMessage("Не удалось создать платёж. Данные карты не списывались. Попробуйте ещё раз или напишите в поддержку.");
+    }
   }
   return <main className="checkout-page">
     <nav className="nav shell"><a className="brand" href="/"><span className="brand-mark">Т</span><span>тихая сеть</span></a><a className="text-link" href="/">← На главную</a></nav>

@@ -10,7 +10,7 @@ export default function Home() {
     <main>
       <nav className="nav shell" aria-label="Основная навигация">
         <a className="brand" href="#top" aria-label="Тихая сеть — на главную"><span className="brand-mark" aria-hidden="true">Т</span><span>тихая сеть</span></a>
-        <div className="nav-links"><a href="#plans">Тарифы</a><a href="#how">Как подключиться</a><a href="#faq">Вопросы</a></div>
+        <div className="nav-links"><a href="#plans">Тарифы</a><a href="/setup">Как подключиться</a><a href="#faq">Вопросы</a></div>
         <a className="button button-small button-ghost" href="/checkout">Личный кабинет</a>
       </nav>
 
@@ -54,12 +54,15 @@ export default function Home() {
         <details open><summary>Какие устройства поддерживаются?</summary><p>Android, iOS, Windows и macOS. После оплаты вы получите инструкции для каждой системы.</p></details>
         <details><summary>Есть ли автоматические списания?</summary><p>Нет. Каждый новый период вы оплачиваете самостоятельно.</p></details>
         <details><summary>Что делать, если не получилось подключиться?</summary><p>Напишите в поддержку через Telegram. Поможем проверить приложение и подключение.</p></details>
-        <details><summary>Можно ли вернуть оплату?</summary><p>Да, по условиям возврата. Заявку можно создать через поддержку.</p></details>
+        <details><summary>Как продлить подписку?</summary><p>Откройте личный кабинет через Telegram, выберите срок и оплатите новый период. Для активной подписки срок добавится к текущей дате окончания.</p></details>
+        <details><summary>Как перенести доступ на другое устройство?</summary><p>Отключите старое устройство, затем откройте ту же персональную ссылку на новом. Одновременно разрешено одно устройство.</p></details>
+        <details><summary>Что делать при ошибке оплаты?</summary><p>Не оплачивайте заказ повторно сразу. Проверьте статус в кабинете; если деньги списались, а доступ не появился, отправьте поддержке email и время платежа.</p></details>
+        <details><summary>Можно ли вернуть оплату?</summary><p>Заявка подаётся через поддержку. Укажите email, дату и сумму платежа, но не отправляйте данные карты.</p></details>
       </div></div></section>
 
       <footer><div className="shell footer-grid">
         <div><a className="brand brand-light" href="#top"><span className="brand-mark">Т</span><span>тихая сеть</span></a><p>Связь без лишнего шума.</p></div>
-        <div><b>Сервис</b><a href="#plans">Тарифы</a><a href="/checkout">Личный кабинет</a><a href="#how">Инструкции</a></div>
+        <div><b>Сервис</b><a href="#plans">Тарифы</a><a href="/checkout">Личный кабинет</a><a href="/setup">Инструкции</a></div>
         <div><b>Документы</b><a href="/offer">Оферта</a><a href="/privacy">Конфиденциальность</a><a href="/refund">Возвраты</a></div>
         <div><b>Поддержка</b><a href="https://t.me/alanet_bot">Telegram</a><a href="mailto:help@alanet.ru">help@alanet.ru</a></div>
       </div><div className="shell footer-bottom"><span>© 2026 Тихая сеть</span><span>Оплата защищена ЮKassa</span></div></footer>

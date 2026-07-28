@@ -1,4 +1,8 @@
 import structlog
+import asyncio
+import time
+import uuid
+from collections import defaultdict, deque
 from datetime import UTC, datetime
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,6 +21,34 @@ log = structlog.get_logger()
 app = FastAPI(title="Quiet Network Billing API", version="0.1.0", docs_url="/api/docs" if settings.environment != "production" else None)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
 Instrumentator().instrument(app).expose(app, include_in_schema=False)
+rate_buckets: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+rate_lock = asyncio.Lock()
+rate_limits = {
+    "/api/v1/checkout": (10, 60),
+    "/api/v1/me/checkout": (10, 60),
+    "/api/v1/auth/telegram/exchange": (10, 60),
+    "/webhooks/yookassa": (120, 60),
+    "/webhooks/telegram": (300, 60),
+}
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    limit = rate_limits.get(request.url.path)
+    if limit:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        client_ip = forwarded.split(",", 1)[0].strip() or (request.client.host if request.client else "unknown")
+        maximum, window = limit
+        now = time.monotonic()
+        key = (request.url.path, client_ip)
+        async with rate_lock:
+            bucket = rate_buckets[key]
+            while bucket and bucket[0] <= now - window:
+                bucket.popleft()
+            if len(bucket) >= maximum:
+                return Response(status_code=429, content='{"detail":"too many requests"}', media_type="application/json", headers={"Retry-After": str(window)})
+            bucket.append(now)
+    return await call_next(request)
 
 
 @app.get("/health")
@@ -58,6 +90,15 @@ async def me(request: Request, session: AsyncSession = Depends(get_session)) -> 
     if subscription:
         plan = await session.scalar(select(Plan).join(Order, Order.plan_id == Plan.id).where(Order.customer_id == customer.id, Order.status == OrderStatus.ACTIVE).order_by(Order.created_at.desc()))
     return {"customer": {"email": customer.email, "telegram_username": customer.telegram_username}, "subscription": ({"status": subscription.status.value, "expires_at": subscription.expires_at.isoformat(), "subscription_url": subscription.subscription_url, "plan": plan.name if plan else "Подписка", "locations": "1 локация — ALANET-CZ-1" if plan and plan.slug == "trial" else "Все доступные локации"} if subscription else None)}
+
+
+@app.get("/api/v1/orders/{order_id}")
+async def order_status(order_id: uuid.UUID, session: AsyncSession = Depends(get_session)) -> dict[str, object]:
+    order = await session.get(Order, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="order not found")
+    subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == order.customer_id)) if order.status == OrderStatus.ACTIVE else None
+    return {"status": order.status.value, "subscription_url": subscription.subscription_url if subscription else None, "expires_at": subscription.expires_at.isoformat() if subscription else None}
 
 
 @app.post("/api/v1/auth/logout")
