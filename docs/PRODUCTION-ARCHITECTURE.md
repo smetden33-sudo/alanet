@@ -14,6 +14,7 @@ Client
 Telegram → api.alanet.ru/webhooks/telegram → billing API → PostgreSQL/Redis
                                                └──────────→ Remnawave API
 YooKassa → api.alanet.ru/webhooks/yookassa → billing API → Remnawave API
+Redis/Celery beat → billing worker → retry failed provisioning / reconcile payments
 ```
 
 ## Primary VPS
@@ -22,7 +23,7 @@ YooKassa → api.alanet.ru/webhooks/yookassa → billing API → Remnawave API
 - SSH deployment user: `deploy`
 - Application root: `/opt/alanet`
 - Compose file: `/opt/alanet/deploy/compose.yml`
-- Runtime services: web, api, Caddy, billing PostgreSQL, billing Redis, Remnawave, Remnawave PostgreSQL, Remnawave Redis, subscription page, Remnawave node.
+- Runtime services: web, api, billing worker, Caddy, billing PostgreSQL, billing Redis, Remnawave, Remnawave PostgreSQL, Remnawave Redis, subscription page, Remnawave node.
 
 The API uses `https://panel.alanet.ru` as its Remnawave base URL. This is required by the current panel configuration; the internal HTTP endpoint closes API connections.
 
@@ -37,6 +38,8 @@ The API uses `https://panel.alanet.ru` as its Remnawave base URL. This is requir
 | `sub.alanet.ru` | Remnawave subscription page |
 
 YooKassa production is enabled in billing API. The API credentials are stored only in the production `.env`; the `payment.succeeded` notification must be configured in the YooKassa merchant dashboard to `https://api.alanet.ru/webhooks/yookassa`.
+
+The webhook fetches the payment from YooKassa and requires an exact match for status, RUB amount, `order_id`, `customer_id` and `plan_id`. A notification payload alone is never trusted.
 
 Authenticated customers renew through `POST /api/v1/me/checkout`. The endpoint accepts only a paid plan slug, resolves the customer from the HttpOnly web session, and uses the email and Telegram identity already attached to that customer. The browser never supplies an email for renewal.
 
@@ -54,6 +57,8 @@ The billing database stores one `Customer` and one `Subscription` per Telegram a
 - `year`: 365 days, unlimited, 1 device, `PAID-USERS`.
 
 On a new subscription the API calls `POST /api/users`. On renewal or plan change it calls `PATCH /api/users` by the stored Remnawave UUID and updates expiry, limits and active internal squads.
+
+Failed provisioning is stored as `PROVISIONING_FAILED`. `alanet-worker-1` checks the retry queue every minute and accepts paid orders only when their local payment is confirmed; free trial/admin grants remain eligible without a payment. The target expiry is persisted on the order and reused on every attempt. A PostgreSQL advisory lock serializes webhook, worker and `/retry <order_id>` execution for the same order, so a retry cannot extend an active subscription twice.
 
 ## Rollback
 

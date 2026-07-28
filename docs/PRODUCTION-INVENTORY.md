@@ -43,6 +43,7 @@ Inventory checked on 2026-07-27. Credentials, tokens and private keys are intent
 
 ## Scheduled operations
 
-- `alanet-healthcheck.timer`: every 5 minutes (more frequent than a daily check); validates domains, API, Telegram webhook, all seven nodes, one subscription URL, listener 443 and all 10 containers on the primary VPS.
+- `alanet-healthcheck.timer`: every 5 minutes (more frequent than a daily check); validates domains, API, Telegram webhook, all seven nodes, one subscription URL, listener 443 and all 11 containers on the primary VPS.
+- `alanet-worker-1`: Celery worker with embedded beat; retries failed provisioning every minute and reconciles pending payment states every five minutes.
 - `alanet-backup.timer`: daily at approximately 03:15 UTC with a randomized delay; retains seven days of archives.
 - Health-check output and failures are available through `journalctl -u alanet-healthcheck.service`.

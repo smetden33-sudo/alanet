@@ -277,8 +277,16 @@ async def retry_failed_provisioning(session: AsyncSession, settings: Settings, o
         raise ValueError("order not found")
     if order.status != OrderStatus.PROVISIONING_FAILED:
         raise ValueError("order is not waiting for provisioning retry")
+    payment = None
     if order.amount > 0:
         payment = await session.scalar(select(Payment).where(Payment.order_id == order.id))
         if not payment or payment.status != "succeeded" or payment.paid_at is None:
             raise ValueError("paid order has no confirmed payment")
-    return await provision_order(session, settings, order_id)
+    subscription = await provision_order(session, settings, order_id)
+    if payment and payment.yookassa_payment_id:
+        event = await session.scalar(select(WebhookEvent).where(WebhookEvent.provider == "yookassa", WebhookEvent.external_event_id == payment.yookassa_payment_id))
+        if event:
+            event.processing_status = "PROCESSED"
+            event.processed_at = datetime.now(UTC)
+            await session.commit()
+    return subscription
