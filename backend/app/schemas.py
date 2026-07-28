@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -11,6 +13,10 @@ class CheckoutResponse(BaseModel):
     order_id: str
     confirmation_url: str
     telegram_bind_url: str | None = None
+
+
+class RenewalCheckoutRequest(BaseModel):
+    plan_slug: Literal["start", "calm", "year"]
 
 
 class BindTelegramRequest(BaseModel):

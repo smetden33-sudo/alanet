@@ -49,3 +49,16 @@ test("starter preview dependency is removed", async () => {
   assert.match(layout, /Тихая сеть/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 });
+
+test("account renewal uses the authenticated checkout", async () => {
+  const [accountPage, apiMain, schemas] = await Promise.all([
+    readFile(new URL("../app/account/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../backend/app/main.py", import.meta.url), "utf8"),
+    readFile(new URL("../backend/app/schemas.py", import.meta.url), "utf8"),
+  ]);
+  assert.match(accountPage, /Продлить подписку/);
+  assert.match(accountPage, /\/api\/v1\/me\/checkout/);
+  assert.doesNotMatch(accountPage, /me\/checkout[\s\S]{0,400}email:/);
+  assert.match(apiMain, /current_web_customer\(request, session\)/);
+  assert.match(schemas, /Literal\["start", "calm", "year"\]/);
+});

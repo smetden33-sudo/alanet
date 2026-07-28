@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
 from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription
-from .schemas import CheckoutRequest, CheckoutResponse, TelegramSessionExchangeRequest
+from .schemas import CheckoutRequest, CheckoutResponse, RenewalCheckoutRequest, TelegramSessionExchangeRequest
 from .services import accept_yookassa_webhook, create_checkout, exchange_web_login_token, get_web_session
 
 settings = get_settings()
@@ -83,6 +83,30 @@ async def checkout(data: CheckoutRequest, session: AsyncSession = Depends(get_se
         log.exception("checkout_failed")
         raise HTTPException(status_code=503, detail="payment provider unavailable")
     return CheckoutResponse(order_id=str(order.id), confirmation_url=url, telegram_bind_url=bind_url)
+
+
+@app.post("/api/v1/me/checkout", response_model=CheckoutResponse, status_code=status.HTTP_201_CREATED)
+async def authenticated_checkout(data: RenewalCheckoutRequest, request: Request, session: AsyncSession = Depends(get_session)) -> CheckoutResponse:
+    if not settings.yookassa_enabled:
+        raise HTTPException(status_code=503, detail="payment integration is not configured")
+    _, customer = await current_web_customer(request, session)
+    if customer.telegram_id is None:
+        raise HTTPException(status_code=409, detail="telegram account is not linked")
+    try:
+        order, url, _ = await create_checkout(
+            session,
+            settings,
+            plan_slug=data.plan_slug,
+            email=customer.email,
+            telegram_username=customer.telegram_username,
+            telegram_id=customer.telegram_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception:
+        log.exception("authenticated_checkout_failed", customer_id=str(customer.id))
+        raise HTTPException(status_code=503, detail="payment provider unavailable")
+    return CheckoutResponse(order_id=str(order.id), confirmation_url=url)
 
 
 @app.post("/webhooks/yookassa")
