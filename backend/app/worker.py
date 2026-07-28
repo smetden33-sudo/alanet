@@ -62,8 +62,13 @@ async def _subscription_lifecycle() -> dict[str, int]:
     async with SessionLocal() as session:
         expired = list((await session.scalars(select(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE, Subscription.expires_at <= now).limit(100))).all())
         for subscription in expired:
+            subscription_id = str(subscription.id)
             try:
-                await RemnawaveClient(settings).disable_user(subscription.remnawave_user_id)
+                await RemnawaveClient(settings).update_user(
+                    subscription.remnawave_user_id,
+                    user_uuid=str(subscription.remnawave_legacy_uuid) if subscription.remnawave_legacy_uuid else None,
+                    status="DISABLED",
+                )
                 subscription.status = SubscriptionStatus.EXPIRED
                 session.add(AuditLog(actor="worker:lifecycle", action="subscription_expired", entity="subscription", entity_id=str(subscription.id), details={"expires_at": subscription.expires_at.isoformat()}))
                 customer = await session.get(Customer, subscription.customer_id)
@@ -73,7 +78,7 @@ async def _subscription_lifecycle() -> dict[str, int]:
                     await send_telegram_message(settings, customer.telegram_id, "Срок подписки ALANET закончился. Откройте /account или раздел «Купить подписку», чтобы восстановить доступ.")
             except Exception:
                 await session.rollback()
-                log.exception("subscription_expiry_failed", subscription_id=str(subscription.id))
+                log.exception("subscription_expiry_failed", subscription_id=subscription_id)
 
         deadline = now + timedelta(hours=72)
         upcoming = list((await session.scalars(select(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE, Subscription.expires_at > now, Subscription.expires_at <= deadline).limit(200))).all())
