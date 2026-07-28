@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import Settings
 from .integrations.remnawave import RemnawaveClient
 from .integrations.yookassa import YooKassaClient
-from .models import Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus, TelegramBindToken, WebLoginToken, WebSession, WebhookEvent
+from .models import AuditLog, Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus, TelegramBindToken, WebLoginToken, WebSession, WebhookEvent
 
 
 def normalize_email(email: str) -> str:
@@ -134,20 +134,37 @@ async def create_checkout(
     if not plan:
         raise ValueError("unknown plan")
     email = normalize_email(email)
-    customer = None
+    email_customer = await session.scalar(select(Customer).where(func.lower(Customer.email) == email).with_for_update())
+    customer = email_customer
+    telegram_was_linked = False
     if telegram_id is not None:
-        customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id).with_for_update())
-    if not customer:
-        customer = await session.scalar(select(Customer).where(func.lower(Customer.email) == email).with_for_update())
+        telegram_customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id).with_for_update())
+        if telegram_customer and email_customer and telegram_customer.id != email_customer.id:
+            raise ValueError("telegram account and email belong to different customers")
+        customer = telegram_customer or email_customer
+        if customer and customer.telegram_id not in (None, telegram_id):
+            raise ValueError("email is already linked to another telegram account")
+        if customer and customer.telegram_id is None:
+            customer.telegram_id = telegram_id
+            telegram_was_linked = True
     if customer:
         customer.email = email
         customer.telegram_username = telegram_username
     else:
         customer = Customer(email=email, telegram_username=telegram_username, telegram_id=telegram_id)
+        telegram_was_linked = telegram_id is not None
     order = Order(customer=customer, plan=plan, amount=plan.price_rub, status=OrderStatus.CREATED)
     key = str(uuid.uuid4())
     session.add_all([customer, order])
     await session.flush()
+    if telegram_was_linked:
+        session.add(AuditLog(
+            actor=f"telegram:{telegram_id}",
+            action="telegram_identity_registered",
+            entity="customer",
+            entity_id=str(customer.id),
+            details={"telegram_username": telegram_username},
+        ))
     payment = Payment(order_id=order.id, idempotency_key=key, amount=plan.price_rub, status="CREATING")
     session.add(payment)
     result = await YooKassaClient(settings).create_payment(order_id=str(order.id), customer_id=str(customer.id), plan_id=str(plan.id), amount=plan.price_rub, email=email, return_url=f"{settings.public_site_url}/checkout/success?order={order.id}", idempotency_key=key)
