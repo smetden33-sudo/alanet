@@ -68,3 +68,9 @@ test("telegram bot does not expose the web personal cabinet", async () => {
   assert.match(telegram, /Моя подписка/);
   assert.doesNotMatch(telegram, /Личный кабинет|callback_data=["']account["']|Command\(["']account["']\)/);
 });
+
+test("telegram checkout does not ask for email", async () => {
+  const telegram = await readFile(new URL("../backend/app/telegram.py", import.meta.url), "utf8");
+  assert.match(telegram, /telegram-\{telegram_id\}@users\.alanet\.ru/);
+  assert.doesNotMatch(telegram, /CheckoutState\.email|Отправьте email для электронного чека/);
+});

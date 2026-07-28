@@ -4,9 +4,7 @@ from datetime import UTC, datetime, timedelta
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from pydantic import EmailStr, TypeAdapter, ValidationError
 from sqlalchemy import func, or_, select
 
 from .config import get_settings
@@ -20,12 +18,7 @@ log = structlog.get_logger()
 dispatcher = Dispatcher()
 router = Router()
 dispatcher.include_router(router)
-email_adapter = TypeAdapter(EmailStr)
 _bot: Bot | None = None
-
-
-class CheckoutState(StatesGroup):
-    email = State()
 
 
 def get_bot() -> Bot:
@@ -588,50 +581,34 @@ async def select_plan(callback: CallbackQuery, state: FSMContext) -> None:
             reply_markup=main_menu(),
         )
         return
-    await state.set_state(CheckoutState.email)
-    await state.update_data(plan_slug=plan.slug)
-    await answer_callback(
-        callback,
-        f"Вы выбрали «{plan.name}» за {plan.price_rub:.0f} ₽.\n\n"
-        "Отправьте email для электронного чека. Для отмены используйте /cancel.",
-    )
-
-
-@router.message(CheckoutState.email)
-async def checkout_email(message: Message, state: FSMContext) -> None:
-    try:
-        email = str(email_adapter.validate_python((message.text or "").strip()))
-    except ValidationError:
-        await message.answer("Не удалось распознать email. Проверьте адрес и отправьте ещё раз.")
-        return
-    data = await state.get_data()
-    slug = str(data.get("plan_slug", ""))
-    telegram_id = message.from_user.id if message.from_user else None
-    telegram_username = f"@{message.from_user.username}" if message.from_user and message.from_user.username else None
+    telegram_id = callback.from_user.id
+    telegram_username = f"@{callback.from_user.username}" if callback.from_user.username else None
+    async with SessionLocal() as session:
+        customer = await session.scalar(select(Customer).where(Customer.telegram_id == telegram_id))
+        email = customer.email if customer else f"telegram-{telegram_id}@users.alanet.ru"
     try:
         async with SessionLocal() as session:
             order, confirmation_url, _bind_url = await create_checkout(
                 session,
                 settings,
-                plan_slug=slug,
+                plan_slug=plan.slug,
                 email=email,
                 telegram_username=telegram_username,
                 telegram_id=telegram_id,
             )
     except ValueError:
-        await state.clear()
-        await message.answer("Тариф недоступен. Начните оформление заново.", reply_markup=main_menu())
+        await answer_callback(callback, "Тариф недоступен. Начните оформление заново.", reply_markup=main_menu())
         return
     except Exception:
         log.exception("telegram_checkout_failed", telegram_id=telegram_id)
-        await message.answer("Платёжный сервис временно недоступен. Попробуйте позже.")
+        await answer_callback(callback, "Платёжный сервис временно недоступен. Попробуйте позже.", reply_markup=main_menu())
         return
-    await state.clear()
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[[InlineKeyboardButton(text="Оплатить", url=confirmation_url)]]
     )
-    await message.answer(
-        f"Заказ {order.id} создан. Нажмите кнопку ниже, чтобы перейти к безопасной оплате.",
+    await answer_callback(
+        callback,
+        f"Вы выбрали «{plan.name}» за {plan.price_rub:.0f} ₽. Заказ создан — нажмите кнопку ниже для безопасной оплаты.",
         reply_markup=keyboard,
     )
 
