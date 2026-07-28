@@ -66,13 +66,13 @@ ss -ltn | grep -q ':443 '
 printf 'xray_listener=443\n'
 
 for container in \
-  alanet-web-1 alanet-api-1 alanet-caddy-1 \
+  alanet-web-1 alanet-api-1 alanet-worker-1 alanet-caddy-1 \
   alanet-billing-db-1 alanet-billing-redis-1 \
   remnawave remnawave-db remnawave-redis \
   remnawave-subscription-page remnanode
 do
   [[ "$(docker inspect -f '{{.State.Running}}' "${container}")" == "true" ]]
 done
-printf 'containers=10/10\n'
+printf 'containers=11/11\n'
 
 rm -f /tmp/alanet-client-subscription /tmp/alanet-client-subscription.decoded

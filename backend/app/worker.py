@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from celery import Celery
 from sqlalchemy import select
@@ -6,9 +7,10 @@ from .config import get_settings
 from .db import SessionLocal
 from .integrations.yookassa import YooKassaClient
 from .models import Order, OrderStatus, Payment
-from .services import provision_order
+from .services import retry_failed_provisioning
 
 settings = get_settings()
+log = logging.getLogger(__name__)
 celery = Celery("billing", broker=settings.redis_url, backend=settings.redis_url)
 celery.conf.update(task_serializer="json", accept_content=["json"], result_serializer="json", timezone="UTC", beat_schedule={
     "retry-provisioning": {"task": "app.worker.retry_provisioning", "schedule": 60.0},
@@ -22,10 +24,11 @@ async def _retry_provisioning() -> int:
         order_ids = list((await session.scalars(select(Order.id).where(Order.status == OrderStatus.PROVISIONING_FAILED).limit(25))).all())
         for order_id in order_ids:
             try:
-                await provision_order(session, settings, order_id)
+                await retry_failed_provisioning(session, settings, order_id)
                 completed += 1
             except Exception:
                 await session.rollback()
+                log.exception("provisioning retry failed for order %s", order_id)
     return completed
 
 

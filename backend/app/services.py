@@ -3,7 +3,7 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import Settings
 from .integrations.remnawave import RemnawaveClient
@@ -104,6 +104,23 @@ def extended_expiry(current: datetime | None, duration_days: int, now: datetime 
     return base + timedelta(days=duration_days)
 
 
+def payment_matches_order(verified: dict, order: Order) -> bool:
+    try:
+        amount = Decimal(verified["amount"]["value"])
+        currency = verified["amount"]["currency"]
+    except (KeyError, TypeError, ValueError):
+        return False
+    metadata = verified.get("metadata") or {}
+    return (
+        verified.get("status") == "succeeded"
+        and currency == "RUB"
+        and amount == order.amount
+        and metadata.get("order_id") == str(order.id)
+        and metadata.get("customer_id") == str(order.customer_id)
+        and metadata.get("plan_id") == str(order.plan_id)
+    )
+
+
 async def create_checkout(
     session: AsyncSession,
     settings: Settings,
@@ -164,10 +181,7 @@ async def accept_yookassa_webhook(session: AsyncSession, settings: Settings, pay
         raise ValueError("order not found")
     if not existing:
         existing = await session.scalar(select(WebhookEvent).where(WebhookEvent.provider == "yookassa", WebhookEvent.external_event_id == payment_id).with_for_update())
-    amount = Decimal(verified["amount"]["value"])
-    metadata = verified.get("metadata", {})
-    valid = verified.get("status") == "succeeded" and verified["amount"]["currency"] == "RUB" and amount == order.amount and metadata.get("order_id") == str(order.id)
-    if not valid:
+    if not payment_matches_order(verified, order):
         raise ValueError("payment verification failed")
     event = existing or WebhookEvent(provider="yookassa", external_event_id=payment_id, payload=payload)
     session.add(event)
@@ -200,35 +214,71 @@ async def accept_yookassa_webhook(session: AsyncSession, settings: Settings, pay
 
 
 async def provision_order(session: AsyncSession, settings: Settings, order_id: uuid.UUID) -> Subscription:
+    # The transaction-scoped advisory lock serializes webhook, worker and manual
+    # retries for one order while allowing unrelated orders to run concurrently.
+    await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:order_id, 0))"), {"order_id": str(order_id)})
+    order = await session.scalar(select(Order).where(Order.id == order_id).with_for_update())
+    if not order:
+        raise ValueError("order not found")
+    if order.status == OrderStatus.ACTIVE:
+        current = await session.scalar(select(Subscription).where(Subscription.customer_id == order.customer_id))
+        if not current:
+            raise ValueError("active order has no subscription")
+        return current
+    if order.status not in {OrderStatus.PAID, OrderStatus.PROVISIONING, OrderStatus.PROVISIONING_FAILED}:
+        raise ValueError("order is not ready for provisioning")
+    customer, plan = await session.get(Customer, order.customer_id), await session.get(Plan, order.plan_id)
+    if not customer or not plan:
+        raise ValueError("order customer or plan not found")
+    subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == order.customer_id))
+    expiry = order.expires_at or extended_expiry(subscription.expires_at if subscription else None, plan.duration_days)
+    order.expires_at = expiry
+    order.status = OrderStatus.PROVISIONING
+    client = RemnawaveClient(settings)
+    try:
+        if subscription:
+            await client.update_user(
+                subscription.remnawave_user_id,
+                user_uuid=str(subscription.remnawave_legacy_uuid) if subscription.remnawave_legacy_uuid else None,
+                expireAt=expiry.isoformat(),
+                status="ACTIVE",
+                trafficLimitBytes=plan.traffic_limit_bytes,
+                hwidDeviceLimit=plan.device_limit,
+                activeInternalSquads=[plan.remnawave_squad_id],
+            )
+            subscription.expires_at = expiry
+            subscription.status = SubscriptionStatus.ACTIVE
+        else:
+            username = f"customer_{str(customer.id).replace('-', '')[:18]}"
+            try:
+                remote = await client.create_user(username=username, expire_at=expiry, traffic_limit_bytes=plan.traffic_limit_bytes, device_limit=plan.device_limit, squad_id=plan.remnawave_squad_id)
+            except Exception:
+                remote = await client.get_user_by_username(username)
+            user_id, url, legacy_uuid = client.user_fields(remote)
+            subscription = Subscription(customer_id=customer.id, remnawave_user_id=user_id, remnawave_legacy_uuid=legacy_uuid, subscription_url=url, starts_at=datetime.now(UTC), expires_at=expiry)
+            session.add(subscription)
+        order.status = OrderStatus.ACTIVE
+        await session.commit()
+        return subscription
+    except Exception:
+        await session.rollback()
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:order_id, 0))"), {"order_id": str(order_id)})
+        failed = await session.scalar(select(Order).where(Order.id == order_id).with_for_update())
+        if failed and failed.status != OrderStatus.ACTIVE:
+            failed.status = OrderStatus.PROVISIONING_FAILED
+            failed.expires_at = failed.expires_at or expiry
+            await session.commit()
+        raise
+
+
+async def retry_failed_provisioning(session: AsyncSession, settings: Settings, order_id: uuid.UUID) -> Subscription:
     order = await session.scalar(select(Order).where(Order.id == order_id))
     if not order:
         raise ValueError("order not found")
-    customer, plan = await session.get(Customer, order.customer_id), await session.get(Plan, order.plan_id)
-    subscription = await session.scalar(select(Subscription).where(Subscription.customer_id == order.customer_id))
-    expiry = extended_expiry(subscription.expires_at if subscription else None, plan.duration_days)
-    client = RemnawaveClient(settings)
-    if subscription:
-        await client.update_user(
-            subscription.remnawave_user_id,
-            user_uuid=str(subscription.remnawave_legacy_uuid) if subscription.remnawave_legacy_uuid else None,
-            expireAt=expiry.isoformat(),
-            status="ACTIVE",
-            trafficLimitBytes=plan.traffic_limit_bytes,
-            hwidDeviceLimit=plan.device_limit,
-            activeInternalSquads=[plan.remnawave_squad_id],
-        )
-        subscription.expires_at = expiry
-        subscription.status = SubscriptionStatus.ACTIVE
-    else:
-        username = f"customer_{str(customer.id).replace('-', '')[:18]}"
-        try:
-            remote = await client.create_user(username=username, expire_at=expiry, traffic_limit_bytes=plan.traffic_limit_bytes, device_limit=plan.device_limit, squad_id=plan.remnawave_squad_id)
-        except Exception:
-            remote = await client.get_user_by_username(username)
-        user_id, url, legacy_uuid = client.user_fields(remote)
-        subscription = Subscription(customer_id=customer.id, remnawave_user_id=user_id, remnawave_legacy_uuid=legacy_uuid, subscription_url=url, starts_at=datetime.now(UTC), expires_at=expiry)
-        session.add(subscription)
-    order.status = OrderStatus.ACTIVE
-    order.expires_at = expiry
-    await session.commit()
-    return subscription
+    if order.status != OrderStatus.PROVISIONING_FAILED:
+        raise ValueError("order is not waiting for provisioning retry")
+    if order.amount > 0:
+        payment = await session.scalar(select(Payment).where(Payment.order_id == order.id))
+        if not payment or payment.status != "succeeded" or payment.paid_at is None:
+            raise ValueError("paid order has no confirmed payment")
+    return await provision_order(session, settings, order_id)

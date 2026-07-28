@@ -1,3 +1,4 @@
+import uuid
 import structlog
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
@@ -11,7 +12,7 @@ from .config import get_settings
 from .db import SessionLocal
 from .integrations.remnawave import RemnawaveClient
 from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription, SubscriptionStatus
-from .services import bind_telegram_token, create_checkout, create_web_login_link, extended_expiry, provision_order
+from .services import bind_telegram_token, create_checkout, create_web_login_link, extended_expiry, provision_order, retry_failed_provisioning
 
 settings = get_settings()
 log = structlog.get_logger()
@@ -208,7 +209,8 @@ async def admin_menu(message: Message) -> None:
         "/extend <telegram_id> <дни> — продлить подписку\n"
         "/revoke <telegram_id> — отозвать подписку\n"
         "/nodes — состояние нод Remnawave\n"
-        "/orders — последние заказы"
+        "/orders — последние заказы\n"
+        "/retry <order_id> — повторить неудачную выдачу"
     )
 
 
@@ -391,6 +393,39 @@ async def admin_orders(message: Message) -> None:
         created = order.created_at.astimezone().strftime("%d.%m %H:%M") if order.created_at else "—"
         lines.append(f"{created} · {customer_label(customer)} · {plan.name} · {order.status.value} · {order.amount:.2f} ₽")
     await message.answer("\n".join(lines))
+
+
+@router.message(Command("retry"))
+async def admin_retry_provisioning(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    args = command_args(message)
+    if len(args) != 1:
+        await message.answer("Использование: /retry <order_id>")
+        return
+    try:
+        order_id = uuid.UUID(args[0])
+    except ValueError:
+        await message.answer("Некорректный UUID заказа.")
+        return
+    async with SessionLocal() as session:
+        order = await session.get(Order, order_id)
+        if not order:
+            await message.answer("Заказ не найден.")
+            return
+        previous_status = order.status.value
+        try:
+            subscription = await retry_failed_provisioning(session, settings, order_id)
+        except ValueError as exc:
+            await message.answer(f"Повтор невозможен: {exc}")
+            return
+        except Exception:
+            log.exception("admin_retry_provisioning_failed", order_id=str(order_id))
+            await message.answer("Повтор provisioning не удался. Заказ сохранён для следующей попытки.")
+            return
+        session.add(AuditLog(actor=f"admin:{message.from_user.id}", action="admin_retry_provisioning", entity="order", entity_id=str(order_id), details={"previous_status": previous_status, "new_status": OrderStatus.ACTIVE.value}))
+        await session.commit()
+    await message.answer(f"Provisioning завершён. Подписка активна до {subscription.expires_at.astimezone().strftime('%d.%m.%Y %H:%M')}.\n{subscription.subscription_url}")
 
 
 @router.callback_query(F.data == "menu")

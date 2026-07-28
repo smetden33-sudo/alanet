@@ -64,6 +64,24 @@ services:
         limits:
           memory: 256M
 
+  worker:
+    build: ../backend
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      billing-db:
+        condition: service_healthy
+      billing-redis:
+        condition: service_started
+    command: ["celery", "-A", "app.worker.celery", "worker", "-B", "--loglevel=INFO", "--concurrency=1"]
+    networks:
+      - default
+      - remnawave-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
   caddy:
     image: caddy:2.10-alpine
     restart: unless-stopped
