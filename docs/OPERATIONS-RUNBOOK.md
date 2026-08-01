@@ -126,7 +126,8 @@ Release flow:
 2. CI builds `web` and `backend` images and publishes `latest` plus a commit SHA tag to GHCR.
 3. Production runs `docker compose pull web api worker`.
 4. Production runs `docker compose up -d --no-deps web api worker`.
-5. `alanet-healthcheck.service` must return `ok`.
+5. CI performs safe Docker cleanup without volumes before/after deploy.
+6. `alanet-healthcheck.service` must return `ok`; CI retries it up to five times to tolerate short restart/load spikes.
 
 Rollback:
 

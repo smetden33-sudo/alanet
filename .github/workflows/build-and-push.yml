@@ -90,4 +90,14 @@ jobs:
           IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; cd /opt/alanet/deploy; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose pull web api worker; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose up -d --no-deps web api worker; sudo docker compose ps web api worker; sudo systemctl start alanet-healthcheck.service; sudo journalctl -u alanet-healthcheck.service -n 40 --no-pager -o cat"
+          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; cd /opt/alanet/deploy; sudo docker image prune -af || true; sudo docker builder prune -af || true; sudo docker container prune -f || true; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose pull web api worker; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose up -d --no-deps web api worker; sudo docker image prune -af || true; sudo docker builder prune -af || true; sudo docker container prune -f || true; sudo docker compose ps web api worker"
+          for attempt in 1 2 3 4 5; do
+            if ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "sudo systemctl start alanet-healthcheck.service"; then
+              ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "sudo journalctl -u alanet-healthcheck.service -n 40 --no-pager -o cat; sudo cat /var/lib/alanet-monitor/health.state"
+              exit 0
+            fi
+            ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "sudo journalctl -u alanet-healthcheck.service -n 40 --no-pager -o cat || true; sudo cat /var/lib/alanet-monitor/health.summary 2>/dev/null || true"
+            echo "Health-check attempt $attempt failed, waiting for services/load to settle..."
+            sleep 30
+          done
+          exit 1
