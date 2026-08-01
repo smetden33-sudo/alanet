@@ -1,9 +1,10 @@
 [Unit]
-Description=Run ALANET production backup daily
+Description=Run ALANET production backup twice daily
 
 [Timer]
-OnCalendar=*-*-* 03:15:00
-RandomizedDelaySec=15m
+OnCalendar=*-*-* 09:00:00
+OnCalendar=*-*-* 18:00:00
+RandomizedDelaySec=10m
 Persistent=true
 
 [Install]

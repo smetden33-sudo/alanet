@@ -1,0 +1,92 @@
+- name: Ensure apt cache is current
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - fail2ban
+      - jq
+      - openssl
+      - python3
+      - python3-apt
+      - unattended-upgrades
+      - ufw
+    state: present
+
+- name: Ensure 2 GiB swap exists
+  ansible.builtin.command: fallocate -l 2G /swapfile.alanet
+  args:
+    creates: /swapfile.alanet
+
+- name: Secure swapfile permissions
+  ansible.builtin.file:
+    path: /swapfile.alanet
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Check active swap
+  ansible.builtin.command: swapon --show=NAME --noheadings
+  register: active_swap
+  changed_when: false
+  failed_when: false
+
+- name: Format swapfile when needed
+  ansible.builtin.command: mkswap /swapfile.alanet
+  register: mkswap_result
+  changed_when: "'setting up swapspace' in (mkswap_result.stdout | lower)"
+  when: "'/swapfile.alanet' not in active_swap.stdout"
+
+- name: Enable swapfile
+  ansible.builtin.command: swapon /swapfile.alanet
+  register: swapon_result
+  changed_when: swapon_result.rc == 0
+  when: "'/swapfile.alanet' not in active_swap.stdout"
+
+- name: Persist swapfile
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    line: "/swapfile.alanet none swap sw 0 0"
+    state: present
+
+- name: Configure fail2ban sshd jail
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/sshd.local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [sshd]
+      enabled = true
+      maxretry = 5
+      bantime = 1h
+      findtime = 10m
+  notify: Restart fail2ban
+
+- name: Apply ALANET sysctl hardening
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/99-alanet.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      vm.swappiness=20
+      net.ipv4.tcp_syncookies=1
+      net.ipv4.conf.all.rp_filter=1
+      net.ipv4.conf.default.rp_filter=1
+  notify: Reload sysctl
+
+- name: Ensure operational directories exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: /opt/alanet, mode: "0700" }
+    - { path: /opt/remnanode, mode: "0750" }

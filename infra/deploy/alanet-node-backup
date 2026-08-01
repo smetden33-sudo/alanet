@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+umask 077
+
+backup_root="${ALANET_NODE_BACKUP_DIR:-/var/backups/alanet-nodes}"
+monitor_dir="${ALANET_MONITOR_DIR:-/var/lib/alanet-monitor}"
+node_registry="${ALANET_NODE_REGISTRY:-/opt/alanet/infra/node-registry.json}"
+head_registry="${ALANET_HEAD_REGISTRY:-/opt/alanet/infra/head-registry.json}"
+ssh_key="${ALANET_NODE_BACKUP_SSH_KEY:-/etc/alanet/ssh/alanet_deploy_ed25519}"
+stamp="$(date -u '+%Y%m%dT%H%M%SZ')"
+mkdir -p "${backup_root}" "${monitor_dir}"
+workdir="$(mktemp -d "${backup_root}/.work-${stamp}-XXXXXX")"
+archive="${backup_root}/alanet-node-backups-${stamp}.tar.gz"
+encrypted_archive="${archive}.enc"
+status_file="${monitor_dir}/node-backup.status.json"
+
+cleanup() {
+  rm -rf "${workdir}"
+}
+trap cleanup EXIT
+
+json_status() {
+  local status="$1" message="$2" archive_path="${3:-}" encrypted_path="${4:-}" s3_target="${5:-}" ok_count="${6:-0}" fail_count="${7:-0}" failed_nodes_json="${8:-[]}"
+  python3 - "$status" "$message" "$archive_path" "$encrypted_path" "$s3_target" "$ok_count" "$fail_count" "$failed_nodes_json" > "${status_file}" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+status, message, archive_path, encrypted_path, s3_target, ok_count, fail_count, failed_nodes_json = sys.argv[1:9]
+try:
+    failed_nodes = json.loads(failed_nodes_json)
+except Exception:
+    failed_nodes = []
+payload = {
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "status": status,
+    "message": message,
+    "archive": os.path.basename(archive_path) if archive_path else None,
+    "encrypted_archive": os.path.basename(encrypted_path) if encrypted_path else None,
+    "encrypted_size_bytes": os.path.getsize(encrypted_path) if encrypted_path and os.path.exists(encrypted_path) else None,
+    "s3_target": s3_target or None,
+    "ok_count": int(ok_count),
+    "fail_count": int(fail_count),
+    "failed_nodes": failed_nodes,
+    "key": "alanet_deploy_ed25519",
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+  chmod 644 "${status_file}"
+}
+
+fail() {
+  local message="$1"
+  json_status "failed" "${message}" "${archive}" "" "" 0 0 "[]"
+  echo "node_backup_failed=${message}"
+  exit 1
+}
+
+[[ -s "${ssh_key}" ]] || fail "SSH key is missing: ${ssh_key}"
+chmod 600 "${ssh_key}" || true
+
+cat > "${workdir}/remote-backup.sh" <<'SH'
+set -e
+export LC_ALL=C
+tmp="$(mktemp -d /tmp/alanet-node-backup.XXXXXX)"
+trap 'rm -rf "$tmp"' EXIT
+mkdir -p "$tmp/meta" "$tmp/files"
+(hostname -f 2>/dev/null || hostname 2>/dev/null || true) > "$tmp/meta/hostname.txt"
+date -Is > "$tmp/meta/created_at.txt"
+uname -a > "$tmp/meta/uname.txt" 2>/dev/null || true
+cat /etc/os-release > "$tmp/meta/os-release.txt" 2>/dev/null || true
+ip addr show > "$tmp/meta/ip-addr.txt" 2>/dev/null || true
+ip route show > "$tmp/meta/ip-route.txt" 2>/dev/null || true
+ss -tulpen > "$tmp/meta/ss-tulpen.txt" 2>/dev/null || true
+(systemctl list-units --type=service --all 2>/dev/null | grep -Ei 'remna|xray|sing|caddy|docker' || true) > "$tmp/meta/systemd-services.txt"
+(systemctl list-timers --all 2>/dev/null || true) > "$tmp/meta/systemd-timers.txt"
+(docker ps -a 2>/dev/null || true) > "$tmp/meta/docker-ps-a.txt"
+(docker images 2>/dev/null || true) > "$tmp/meta/docker-images.txt"
+(docker network ls 2>/dev/null || true) > "$tmp/meta/docker-networks.txt"
+(iptables-save 2>/dev/null || true) > "$tmp/meta/iptables-save.txt"
+(nft list ruleset 2>/dev/null || true) > "$tmp/meta/nft-ruleset.txt"
+copy_item() {
+  item="$1"
+  [ -e "$item" ] || return 0
+  parent="$(dirname "$item")"
+  mkdir -p "$tmp/files$parent"
+  cp -a "$item" "$tmp/files$item" 2>/dev/null || true
+}
+for pattern in \
+  /opt/remnanode \
+  /opt/remnanode-* \
+  /opt/alanet/infra/node-registry.json \
+  /etc/systemd/system/remnanode* \
+  /etc/systemd/system/xray* \
+  /etc/systemd/system/sing-box* \
+  /etc/xray \
+  /usr/local/etc/xray \
+  /etc/sing-box \
+  /usr/local/etc/sing-box; do
+  for item in $pattern; do
+    [ -e "$item" ] && copy_item "$item"
+  done
+done
+tar -C "$tmp" -czf - .
+SH
+chmod 700 "${workdir}/remote-backup.sh"
+
+python3 - "${node_registry}" "${head_registry}" > "${workdir}/targets.tsv" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+node_registry = Path(sys.argv[1])
+head_registry = Path(sys.argv[2])
+targets = []
+if node_registry.exists():
+    data = json.loads(node_registry.read_text(encoding="utf-8"))
+    for node in data.get("nodes", []):
+        if node.get("status") != "active":
+            continue
+        targets.append({
+            "kind": "node",
+            "name": node.get("node_name"),
+            "ip": node.get("ip"),
+            "port": int(node.get("control_port") or 22),
+            "user": node.get("ssh_user") or "root",
+        })
+if head_registry.exists():
+    data = json.loads(head_registry.read_text(encoding="utf-8"))
+    for head in data.get("heads", []):
+        if head.get("status", "active") != "active":
+            continue
+        targets.append({
+            "kind": "head",
+            "name": head.get("name"),
+            "ip": head.get("ip"),
+            "port": int(head.get("ssh_port") or head.get("control_port") or 22),
+            "user": head.get("ssh_user") or "root",
+        })
+seen = set()
+for target in targets:
+    if not target["name"] or not target["ip"]:
+        continue
+    key = (target["kind"], target["name"], target["ip"], target["port"], target["user"])
+    if key in seen:
+        continue
+    seen.add(key)
+    print("\t".join(str(target[item]) for item in ["kind", "name", "ip", "port", "user"]))
+PY
+
+cp -f "${node_registry}" "${workdir}/node-registry.json" 2>/dev/null || true
+cp -f "${head_registry}" "${workdir}/head-registry.json" 2>/dev/null || true
+
+ok_count=0
+fail_count=0
+failed_nodes=()
+mkdir -p "${workdir}/targets"
+
+while IFS=$'\t' read -r kind name ip port user; do
+  safe_name="$(printf '%s-%s-%s' "${kind}" "${name}" "${ip}" | tr -c 'A-Za-z0-9_.-' '_')"
+  target_archive="${workdir}/targets/${safe_name}.tar.gz"
+  remote_command="sh -s"
+  if [[ "${user}" != "root" ]]; then
+    remote_command="sudo sh -s"
+  fi
+  if ssh \
+    -i "${ssh_key}" \
+    -o BatchMode=yes \
+    -o StrictHostKeyChecking=accept-new \
+    -o ConnectTimeout=12 \
+    -o ServerAliveInterval=10 \
+    -o ServerAliveCountMax=2 \
+    -p "${port}" \
+    "${user}@${ip}" "${remote_command}" < "${workdir}/remote-backup.sh" > "${target_archive}"; then
+    if [[ -s "${target_archive}" ]]; then
+      ok_count=$((ok_count + 1))
+      printf 'OK %s %s@%s:%s\n' "${name}" "${user}" "${ip}" "${port}"
+    else
+      fail_count=$((fail_count + 1))
+      failed_nodes+=("${name}")
+      rm -f "${target_archive}"
+      printf 'FAIL %s empty archive\n' "${name}"
+    fi
+  else
+    fail_count=$((fail_count + 1))
+    failed_nodes+=("${name}")
+    rm -f "${target_archive}"
+    printf 'FAIL %s ssh failed\n' "${name}"
+  fi
+done < "${workdir}/targets.tsv"
+
+python3 - "${workdir}/targets.tsv" "${ok_count}" "${fail_count}" "${failed_nodes[@]}" > "${workdir}/manifest.json" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+targets_path = Path(sys.argv[1])
+ok_count = int(sys.argv[2])
+fail_count = int(sys.argv[3])
+failed_nodes = sys.argv[4:]
+targets = []
+if targets_path.exists():
+    for line in targets_path.read_text(encoding="utf-8").splitlines():
+        kind, name, ip, port, user = line.split("\t")
+        targets.append({"kind": kind, "name": name, "ip": ip, "port": int(port), "user": user})
+print(json.dumps({
+    "created_at": datetime.now(timezone.utc).isoformat(),
+    "key": "alanet_deploy_ed25519",
+    "ok_count": ok_count,
+    "fail_count": fail_count,
+    "failed_nodes": failed_nodes,
+    "targets": targets,
+}, ensure_ascii=False, indent=2))
+PY
+
+tar -C "${workdir}" -czf "${archive}" targets manifest.json node-registry.json head-registry.json 2>/dev/null || tar -C "${workdir}" -czf "${archive}" targets manifest.json node-registry.json
+chmod 600 "${archive}"
+
+external_target=""
+if [[ -n "${ALANET_BACKUP_ENCRYPTION_PASSPHRASE:-}" ]]; then
+  openssl enc -aes-256-cbc -pbkdf2 -salt \
+    -in "${archive}" \
+    -out "${encrypted_archive}" \
+    -pass env:ALANET_BACKUP_ENCRYPTION_PASSPHRASE || fail "node backup encryption failed"
+  chmod 600 "${encrypted_archive}"
+
+  if [[ -n "${ALANET_BACKUP_RCLONE_DEST:-}" && "$(command -v rclone || true)" ]]; then
+    external_target="${ALANET_BACKUP_RCLONE_DEST%/}/node-backups/$(basename "${encrypted_archive}")"
+    rclone copyto "${encrypted_archive}" "${external_target}" || fail "node backup rclone upload failed"
+  else
+    fail "ALANET_BACKUP_RCLONE_DEST is not configured"
+  fi
+else
+  fail "ALANET_BACKUP_ENCRYPTION_PASSPHRASE is not configured"
+fi
+
+find "${backup_root}" -maxdepth 1 -type f -name 'alanet-node-backups-*.tar.gz' -mtime +"${ALANET_LOCAL_RETENTION_DAYS:-7}" -delete
+find "${backup_root}" -maxdepth 1 -type f -name 'alanet-node-backups-*.tar.gz.enc' -mtime +"${ALANET_LOCAL_RETENTION_DAYS:-7}" -delete
+
+failed_nodes_json="$(python3 - "${failed_nodes[@]}" <<'PY'
+import json
+import sys
+print(json.dumps(sys.argv[1:], ensure_ascii=False))
+PY
+)"
+status="ok"
+message="node/head backup uploaded"
+if [[ "${fail_count}" -gt 0 ]]; then
+  status="partial"
+  message="node/head backup uploaded with failed targets"
+fi
+json_status "${status}" "${message}" "${archive}" "${encrypted_archive}" "${external_target}" "${ok_count}" "${fail_count}" "${failed_nodes_json}"
+printf 'node_backup_%s ok=%s fail=%s target=%s\n' "${status}" "${ok_count}" "${fail_count}" "${external_target}"

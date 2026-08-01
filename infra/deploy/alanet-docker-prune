@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+docker builder prune -af --filter 'until=168h' || true
+docker image prune -af --filter 'until=168h' || true
+docker container prune -f --filter 'until=168h' || true
+docker system df || true

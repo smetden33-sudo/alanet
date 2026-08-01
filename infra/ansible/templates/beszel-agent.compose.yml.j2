@@ -1,0 +1,11 @@
+services:
+  beszel-agent:
+    container_name: {{ beszel_agent_container_name }}
+    image: {{ beszel_agent_image }}
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: "{{ beszel_agent_port }}"
+      KEY: "{{ beszel_public_key }}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro

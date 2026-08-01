@@ -1,0 +1,35 @@
+- name: Check Docker binary
+  ansible.builtin.command: docker --version
+  register: docker_version
+  changed_when: false
+  failed_when: false
+
+- name: Install Docker using official convenience script
+  ansible.builtin.shell: |
+    set -euo pipefail
+    curl -fsSL https://get.docker.com | sh
+  args:
+    executable: /bin/bash
+  when: docker_version.rc != 0
+
+- name: Configure Docker log rotation
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        }
+      }
+  notify: Restart docker
+
+- name: Enable Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true

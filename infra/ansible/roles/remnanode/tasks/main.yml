@@ -1,0 +1,44 @@
+- name: Create RemnaNode directory
+  ansible.builtin.file:
+    path: "{{ remnanode_install_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Write RemnaNode compose file
+  ansible.builtin.template:
+    src: remnanode.compose.yml.j2
+    dest: "{{ remnanode_install_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart remnanode
+
+- name: Write RemnaNode environment
+  ansible.builtin.template:
+    src: remnanode.env.j2
+    dest: "{{ remnanode_install_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart remnanode
+
+- name: Pull RemnaNode image
+  ansible.builtin.command: docker compose --env-file .env -f docker-compose.yml pull
+  args:
+    chdir: "{{ remnanode_install_dir }}"
+  changed_when: "'Downloaded newer image' in remnanode_pull.stdout or 'Pull complete' in remnanode_pull.stdout"
+  register: remnanode_pull
+
+- name: Start RemnaNode
+  ansible.builtin.command: docker compose --env-file .env -f docker-compose.yml up -d
+  args:
+    chdir: "{{ remnanode_install_dir }}"
+  changed_when: true
+
+- name: Verify RemnaNode container is running
+  ansible.builtin.command: "docker inspect -f {% raw %}'{{.State.Running}}'{% endraw %} {{ remnanode_container_name }}"
+  register: remnanode_running
+  changed_when: false
+  failed_when: remnanode_running.stdout.strip() != "true"

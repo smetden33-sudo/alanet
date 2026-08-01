@@ -1,22 +1,16 @@
-# Тихая сеть — MVP на Remnawave
+# ALANET — коммерческий MVP на Remnawave
 
-Готовый каркас сервиса подписки: публичный сайт и checkout, FastAPI-биллинг, YooKassa, Telegram webhook, адаптер Remnawave v3, PostgreSQL, Redis/Celery, Caddy и Docker Compose.
+Проект ALANET — это control plane для продажи и выдачи VPN-доступа через Remnawave/Xray.
 
-> Важно: юридические страницы содержат явно отмеченные шаблоны. Не принимайте реальные платежи до проверки оферты, политики данных, возвратов, чеков и применимого законодательства профильным юристом.
+В составе MVP:
 
-## Что уже реализовано
-
-- адаптивный русскоязычный сайт, тарифы и форма заказа;
-- создание заказа и платежа YooKassa с сохранённым ключом идемпотентности;
-- повторная проверка платежа через API YooKassa при webhook;
-- защита от повторной выдачи доступа;
-- provisioning пользователя и продление в Remnawave;
-- корректное продление от действующей даты окончания, а для истёкшей подписки — от текущего времени;
-- хранение числового `remnawave_user_id` для Remnawave v3 и legacy UUID только для совместимости;
-- Telegram-бот с тарифами, оформлением оплаты, просмотром активной подписки и webhook с проверкой secret token;
-- retry/reconciliation entry points, метрики, healthcheck;
-- изолированная сеть для PostgreSQL и Redis;
-- reverse proxy и security headers в Caddy.
+- публичный сайт и тарифы;
+- FastAPI backend для заказов, оплат и provisioning;
+- Telegram-бот для клиентского сценария и административных команд;
+- интеграция YooKassa;
+- PostgreSQL, Redis/Celery;
+- Caddy reverse proxy;
+- Remnawave panel, subscription page и мульти-нодовая инфраструктура.
 
 ## Локальный запуск сайта
 
@@ -27,55 +21,92 @@ npm.cmd run dev
 
 Сайт откроется на `http://localhost:3000`.
 
-## Запуск backend
+## Локальный запуск backend
 
-1. Скопируйте `.env.example` в `.env`.
-2. Замените все демонстрационные значения и заполните токены.
-3. Запустите:
+1. Скопировать `.env.example` в `.env`.
+2. Заполнить локальные значения и тестовые токены.
+3. Запустить:
 
 ```powershell
 docker compose up --build
 ```
 
-API: `http://localhost:8000`, healthcheck: `/health`, документация в development: `/api/docs`.
+API: `http://localhost:8000`.
 
-## Обязательные настройки перед staging
+Health endpoint: `/health`.
 
-1. В Remnawave создайте отдельный API token только для billing backend и Internal Squad.
-2. Укажите `REMNAWAVE_BASE_URL`, `REMNAWAVE_TOKEN`, `REMNAWAVE_SQUAD_ID`.
-3. В YooKassa заполните shop ID, secret key, VAT code и настройте `payment.succeeded` на `https://api.example.com/webhooks/yookassa`.
-4. Для Telegram задайте webhook на `https://api.example.com/webhooks/telegram` с тем же secret token, что в `.env`.
-5. Замените домены, email, ссылку поддержки и secret login route Caddy.
-6. Включите MFA/Passkey в Remnawave Panel и ограничьте Panel по IP или identity-aware proxy.
-7. Node Port разрешите только со стороны Panel. PostgreSQL и Redis не публикуйте.
-8. Закрепите конкретные версии Remnawave Panel/Node и прогоните contract test адаптера перед обновлением.
+## Production
 
-## Принцип обработки оплаты
+Основной production-контур описан в:
 
-`CREATED → PAYMENT_PENDING → PROVISIONING → ACTIVE`
+- `docs/PRODUCTION-ARCHITECTURE.md`
+- `docs/PRODUCTION-INVENTORY.md`
+- `docs/OPERATIONS-RUNBOOK.md`
 
-Webhook не считается доказательством оплаты сам по себе: backend извлекает payment ID, запрашивает объект платежа у YooKassa и сверяет статус, сумму, RUB, `metadata.order_id`, `metadata.customer_id` и `metadata.plan_id`. Если Remnawave недоступен, заказ становится `PROVISIONING_FAILED`; worker повторяет выдачу с сохранённой целевой датой, а стабильный username и блокировка заказа не позволяют создать второго VPN-пользователя или дважды продлить подписку.
+Production web/API images are built in CI and published to GHCR. The VPS only pulls готовые образы и запускает их через `docker compose pull` / `docker compose up -d`.
 
-## Telegram-бот
+После каждого изменения на production запускать:
 
-Бот показывает активные тарифы из billing DB. После выбора тарифа он запрашивает email для чека, создаёт заказ через тот же защищённый checkout и выдаёт кнопку перехода к YooKassa. Клиент, купивший подписку через бот, может получить свою персональную ссылку и срок действия в разделе «Моя подписка».
+```bash
+sudo systemctl start alanet-healthcheck.service
+sudo journalctl -u alanet-healthcheck.service -n 80 --no-pager -o cat
+```
 
-Если `YOOKASSA_ENABLED=false`, тарифы остаются видимыми, но бот не собирает email и не создаёт заказ. После заполнения реквизитов YooKassa и включения флага платёжный сценарий активируется без изменения кода бота.
+## Staging
 
-## Ограничения текущего каркаса
+Staging для оплат и provisioning описан в:
 
-- автоматический retry работает раз в минуту; для устойчивых ошибок требуется настроить отдельное оповещение администратора;
-- покупки с сайта получают одноразовую Telegram-ссылку привязки на 7 дней; покупки, созданные непосредственно ботом, привязываются автоматически;
-- шаблоны юридических документов требуют реальных реквизитов и проверки;
-- Caddy ожидает, что контейнеры Remnawave и Subscription Page подключены к сети `edge`, либо upstream заменён на доступный внутренний адрес;
-- subscription URL является секретом: не добавляйте его в логи, аналитику и сообщения об ошибках.
+- `deploy/compose.staging.yml`
+- `deploy/.env.staging.example`
+- `docs/STAGING-RUNBOOK.md`
+
+Staging должен использовать отдельные:
+
+- тестовый магазин YooKassa;
+- Telegram-бот;
+- PostgreSQL volume;
+- Redis;
+- ограниченный Remnawave API token;
+- staging/internal squads в Remnawave.
+
+## Сценарий оплаты
+
+Платёжный поток:
+
+```text
+CREATED -> PAYMENT_PENDING -> PROVISIONING -> ACTIVE
+```
+
+Webhook YooKassa не считается доказательством оплаты сам по себе. Backend повторно запрашивает платёж через API YooKassa и сверяет:
+
+- статус платежа;
+- сумму;
+- валюту RUB;
+- `metadata.order_id`;
+- `metadata.customer_id`;
+- `metadata.plan_id`.
+
+Если Remnawave временно недоступен, заказ переводится в `PROVISIONING_FAILED`, после чего retry-механизм может повторить выдачу без изменения оплаченного периода.
+
+## Telegram
+
+Клиент регистрируется по стабильному Telegram ID. Username используется только как отображаемое имя и не должен быть основным идентификатором, потому что пользователь может его изменить.
+
+Администратор привязан к Telegram ID `6137733861`.
 
 ## Проверки
 
 ```powershell
+npm.cmd run lint
 npm.cmd run build
-python -m pytest backend/tests
-docker compose config
+python -m compileall backend/app
 ```
 
-Для staging отдельно проверьте: повторный webhook, двойной клик оплаты, сбой Remnawave после успешного платежа, продление активной и истёкшей подписки, возврат и восстановление базы из внешней копии.
+Для staging дополнительно проверить:
+
+- тестовый платёж YooKassa;
+- повторный webhook;
+- двойной клик оплаты;
+- сбой Remnawave после успешного платежа;
+- ручной retry provisioning;
+- продление активной и истёкшей подписки.

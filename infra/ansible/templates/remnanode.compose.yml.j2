@@ -1,0 +1,19 @@
+services:
+  remnanode-alanet:
+    container_name: ${NODE_CONTAINER_NAME:-remnanode-alanet}
+    hostname: ${NODE_HOSTNAME:-alanet-node}
+    image: {{ remnanode_image }}
+    network_mode: host
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+    environment:
+      - NODE_PORT=${NODE_PORT:-2222}
+      - SECRET_KEY=${SECRET_KEY}
+    mem_limit: ${NODE_MEMORY_LIMIT:-256m}
+    cpus: ${NODE_CPU_LIMIT:-0.75}
+    pids_limit: ${NODE_PIDS_LIMIT:-256}

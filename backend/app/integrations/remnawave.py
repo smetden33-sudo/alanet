@@ -42,6 +42,10 @@ class RemnawaveClient:
         response = await self._request("GET", "/api/nodes")
         return response if isinstance(response, list) else response.get("nodes", [])
 
+    async def list_hosts(self) -> list[dict[str, Any]]:
+        response = await self._request("GET", "/api/hosts")
+        return response if isinstance(response, list) else response.get("hosts", [])
+
     async def update_user(self, user_id: int, *, user_uuid: str | None = None, **changes: Any) -> dict[str, Any]:
         identifier = {"uuid": user_uuid} if user_uuid else {"id": user_id}
         return await self._request("PATCH", "/api/users", json={**identifier, **changes})

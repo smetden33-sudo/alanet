@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "updated_at": "2026-08-01",
+  "heads": [
+    {
+      "name": "head-a",
+      "status": "pending",
+      "notes": "Add ip, ssh_user and ssh_port to include this head in scheduled S3 backups."
+    },
+    {
+      "name": "head-b",
+      "status": "pending",
+      "notes": "Add ip, ssh_user and ssh_port to include this head in scheduled S3 backups."
+    },
+    {
+      "name": "head-c",
+      "status": "pending",
+      "notes": "Add ip, ssh_user and ssh_port to include this head in scheduled S3 backups."
+    }
+  ]
+}

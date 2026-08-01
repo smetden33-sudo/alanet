@@ -1,0 +1,8 @@
+[vpn_nodes]
+%{ for key, node in nodes ~}
+${key} ansible_host=${node.public_ip} node_name=${node.name} node_country=${node.country} node_location=${node.location} remnanode_port=${node.node_port}
+%{ endfor ~}
+
+[vpn_nodes:vars]
+ansible_user=root
+ansible_python_interpreter=/usr/bin/python3

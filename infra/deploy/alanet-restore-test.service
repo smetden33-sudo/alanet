@@ -1,0 +1,9 @@
+[Unit]
+Description=ALANET weekly backup restore test
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/alanet/external-backup.env
+ExecStart=/usr/local/sbin/alanet-restore-test

@@ -1,0 +1,37 @@
+- name: Skip Beszel agent when disabled
+  ansible.builtin.debug:
+    msg: "Beszel agent installation is disabled for {{ inventory_hostname }}."
+  when: not install_beszel_agent | bool
+
+- name: Refuse Beszel installation without public key
+  ansible.builtin.assert:
+    that:
+      - beszel_public_key is defined
+      - beszel_public_key | length > 20
+    fail_msg: "Set beszel_public_key when install_beszel_agent=true."
+  when: install_beszel_agent | bool
+
+- name: Create Beszel agent directory
+  ansible.builtin.file:
+    path: /opt/beszel-agent
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  when: install_beszel_agent | bool
+
+- name: Write Beszel agent compose file
+  ansible.builtin.template:
+    src: beszel-agent.compose.yml.j2
+    dest: /opt/beszel-agent/docker-compose.yml
+    owner: root
+    group: root
+    mode: "0600"
+  when: install_beszel_agent | bool
+
+- name: Start Beszel agent
+  ansible.builtin.command: docker compose -f docker-compose.yml up -d
+  args:
+    chdir: /opt/beszel-agent
+  changed_when: true
+  when: install_beszel_agent | bool

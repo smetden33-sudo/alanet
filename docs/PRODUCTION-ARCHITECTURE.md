@@ -23,6 +23,7 @@ Redis/Celery beat → billing worker → retry failed provisioning / reconcile p
 - SSH deployment user: `deploy`
 - Application root: `/opt/alanet`
 - Compose file: `/opt/alanet/deploy/compose.yml`
+- Runtime images: pulled from GHCR via `ALANET_WEB_IMAGE` and `ALANET_BACKEND_IMAGE`
 - Runtime services: web, api, billing worker, Caddy, billing PostgreSQL, billing Redis, Remnawave, Remnawave PostgreSQL, Remnawave Redis, subscription page, Remnawave node.
 
 The API uses `https://panel.alanet.ru` as its Remnawave base URL. This is required by the current panel configuration; the internal HTTP endpoint closes API connections.
@@ -66,4 +67,4 @@ Failed provisioning is stored as `PROVISIONING_FAILED`. `alanet-worker-1` checks
 
 ## Rollback
 
-Before production changes, copy the affected files to `/opt/alanet/backups/<change>-<UTC timestamp>`. Full daily archives are written to `/var/backups/alanet` by `alanet-backup.timer` and contain billing/Remnawave PostgreSQL dumps plus deployment configuration. The last known-good image and configuration must be retained until the post-deploy health check passes.
+Before production changes, copy the affected files to `/opt/alanet/backups/<change>-<UTC timestamp>`. Full daily archives are written to `/var/backups/alanet` by `alanet-backup.timer` and contain billing/Remnawave PostgreSQL dumps plus deployment configuration. The last known-good image and configuration must be retained until the post-deploy health check passes. Production releases should switch image tags, not rebuild containers on the VPS.

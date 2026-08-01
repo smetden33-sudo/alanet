@@ -1,0 +1,37 @@
+- name: Bootstrap ALANET VPN edge nodes
+  hosts: vpn_nodes
+  become: true
+  gather_facts: true
+
+  vars:
+    remnanode_install_dir: /opt/remnanode
+    remnanode_container_name: remnanode-alanet
+    remnanode_image: remnawave/node:latest
+    remnanode_port: "{{ hostvars[inventory_hostname].remnanode_port | default(2222) }}"
+    remnanode_memory_limit: 256m
+    remnanode_cpu_limit: "0.75"
+    remnanode_pids_limit: 256
+    manage_firewall: true
+    ssh_port: 22
+    vpn_public_tcp_ports: [443]
+    vpn_public_udp_ports: [443]
+    remnanode_control_allowed_cidrs: ["78.17.54.252/32"]
+    install_beszel_agent: false
+    beszel_agent_container_name: beszel-agent
+    beszel_agent_image: henrygd/beszel-agent:latest
+    beszel_agent_port: 45876
+
+  pre_tasks:
+    - name: Refuse to run without RemnaNode secret
+      ansible.builtin.assert:
+        that:
+          - remnanode_secret_key is defined
+          - remnanode_secret_key | length > 20
+        fail_msg: "Pass remnanode_secret_key via Ansible Vault or --extra-vars. Do not commit it."
+
+  roles:
+    - common
+    - docker
+    - firewall
+    - remnanode
+    - monitoring

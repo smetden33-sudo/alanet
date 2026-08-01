@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     session_cookie_domain: str = ".alanet.ru"
     session_ttl_days: int = 30
     telegram_admin_chat_id: int | None = None
+    telegram_owner_ids: str = ""
+    telegram_admin_ids: str = ""
+    telegram_support_ids: str = ""
+    telegram_readonly_ids: str = ""
 
     @field_validator("telegram_admin_chat_id", mode="before")
     @classmethod

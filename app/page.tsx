@@ -1,8 +1,8 @@
 const plans = [
   { name: "Пробный", price: "0", period: "24 часа", traffic: "Безлимитный", devices: "1 устройство", locations: "1 локация", href: "https://t.me/alanet_bot?start=trial" },
-  { name: "Старт", price: "299", period: "30 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации" },
-  { name: "Спокойно", price: "749", period: "90 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации", featured: true },
-  { name: "На год", price: "2 490", period: "365 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации" },
+  { name: "Старт", price: "299", period: "30 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации", href: "https://t.me/alanet_bot" },
+  { name: "Спокойно", price: "749", period: "90 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации", featured: true, href: "https://t.me/alanet_bot" },
+  { name: "На год", price: "2 490", period: "365 дней", traffic: "Безлимитный", devices: "1 устройство", locations: "Все доступные локации", href: "https://t.me/alanet_bot" },
 ];
 
 export default function Home() {
@@ -10,8 +10,8 @@ export default function Home() {
     <main>
       <nav className="nav shell" aria-label="Основная навигация">
         <a className="brand" href="#top" aria-label="Тихая сеть — на главную"><span className="brand-mark" aria-hidden="true">Т</span><span>тихая сеть</span></a>
-        <div className="nav-links"><a href="#plans">Тарифы</a><a href="/setup">Как подключиться</a><a href="#faq">Вопросы</a></div>
-        <a className="button button-small button-ghost" href="/checkout">Личный кабинет</a>
+        <div className="nav-links"><a href="#plans">Тарифы</a><a href="/setup">Как подключиться</a><a href="/status">Статус</a><a href="#faq">Вопросы</a></div>
+        <a className="button button-small button-ghost" href="https://t.me/alanet_bot">Открыть бота</a>
       </nav>
 
       <section className="hero shell" id="top">
@@ -62,7 +62,7 @@ export default function Home() {
 
       <footer><div className="shell footer-grid">
         <div><a className="brand brand-light" href="#top"><span className="brand-mark">Т</span><span>тихая сеть</span></a><p>Связь без лишнего шума.</p></div>
-        <div><b>Сервис</b><a href="#plans">Тарифы</a><a href="/checkout">Личный кабинет</a><a href="/setup">Инструкции</a></div>
+        <div><b>Сервис</b><a href="#plans">Тарифы</a><a href="https://t.me/alanet_bot">Telegram-бот</a><a href="/setup">Инструкции</a><a href="/status">Статус</a></div>
         <div><b>Документы</b><a href="/offer">Оферта</a><a href="/privacy">Конфиденциальность</a><a href="/refund">Возвраты</a></div>
         <div><b>Поддержка</b><a href="https://t.me/alanet_bot">Telegram</a><a href="mailto:help@alanet.ru">help@alanet.ru</a></div>
       </div><div className="shell footer-bottom"><span>© 2026 Тихая сеть</span><span>Оплата защищена ЮKassa</span></div></footer>

@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+backup_dir="${ALANET_BACKUP_DIR:-/var/backups/alanet}"
+external_dir="${ALANET_BACKUP_EXTERNAL_DIR:-}"
+rclone_dest="${ALANET_BACKUP_RCLONE_DEST:-}"
+status_dir="${ALANET_MONITOR_DIR:-/var/lib/alanet-monitor}"
+deploy_env="${ALANET_DEPLOY_ENV:-/opt/alanet/deploy/.env}"
+status_file="${status_dir}/restore-test.status.json"
+workdir="$(mktemp -d /tmp/alanet-restore-test.XXXXXX)"
+container="alanet-restore-test-$$"
+db_name="billing"
+db_user="billing"
+db_password="billing"
+
+mkdir -p "${status_dir}"
+
+cleanup() {
+  docker rm -f "${container}" >/dev/null 2>&1 || true
+  rm -rf "${workdir}"
+}
+trap cleanup EXIT
+
+json_status() {
+  local status="$1" message="$2" archive_name="${3:-}" tables="${4:-}" customers="${5:-}" orders="${6:-}" subscriptions="${7:-}" payments="${8:-}" source="${9:-}"
+  python3 - "$status" "$message" "$archive_name" "$tables" "$customers" "$orders" "$subscriptions" "$payments" "$source" > "${status_file}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+
+status, message, archive_name, tables, customers, orders, subscriptions, payments, source = sys.argv[1:10]
+def as_int(value):
+    try:
+        return int(value)
+    except Exception:
+        return None
+payload = {
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "status": status,
+    "message": message,
+    "archive": archive_name or None,
+    "source": source or None,
+    "tables": as_int(tables),
+    "customers": as_int(customers),
+    "orders": as_int(orders),
+    "subscriptions": as_int(subscriptions),
+    "payments": as_int(payments),
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+  chmod 644 "${status_file}"
+}
+
+send_admin() {
+  local text="$1" token chat_id
+  token="$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "${deploy_env}" | tr -d '\r\n' || true)"
+  chat_id="$(sed -n 's/^TELEGRAM_ADMIN_CHAT_ID=//p' "${deploy_env}" | tr -d '\r\n' || true)"
+  [[ -n "${token}" && -n "${chat_id}" ]] || return 0
+  curl --silent --show-error --max-time 20 \
+    --data-urlencode "chat_id=${chat_id}" \
+    --data-urlencode "text=${text}" \
+    "https://api.telegram.org/bot${token}/sendMessage" >/dev/null || true
+}
+
+fail() {
+  local message="$1" archive_name="${2:-}" source="${3:-}"
+  json_status "failed" "${message}" "${archive_name}" "" "" "" "" "" "${source}"
+  send_admin "ALANET restore-test FAILED: ${message}"
+  echo "restore_test_failed=${message}"
+  exit 1
+}
+
+source="local"
+latest=""
+if [[ -n "${external_dir}" ]]; then
+  latest="$(ls -t "${external_dir}"/alanet-*.tar.gz.enc 2>/dev/null | head -n1 || true)"
+  if [[ -n "${latest}" ]]; then
+    source="external"
+  fi
+fi
+if [[ -z "${latest}" && -n "${rclone_dest}" && "$(command -v rclone || true)" ]]; then
+  latest_name="$(rclone lsf --files-only "${rclone_dest%/}/" 2>/dev/null | grep -E '^alanet-[0-9]{8}T[0-9]{6}Z\.tar\.gz\.enc$' | sort | tail -n1 || true)"
+  if [[ -n "${latest_name}" ]]; then
+    latest="${workdir}/${latest_name}"
+    rclone copyto "${rclone_dest%/}/${latest_name}" "${latest}" || fail "cannot download rclone backup ${latest_name}" "${latest_name}" "rclone"
+    source="rclone"
+  fi
+fi
+if [[ -z "${latest}" ]]; then
+  latest="$(ls -t "${backup_dir}"/alanet-*.tar.gz 2>/dev/null | head -n1 || true)"
+  source="local"
+fi
+[[ -n "${latest}" ]] || fail "no backup archive found" "" "${source}"
+
+restore_archive="${latest}"
+if [[ "${latest}" == *.enc ]]; then
+  [[ -n "${ALANET_BACKUP_ENCRYPTION_PASSPHRASE:-}" ]] || fail "encrypted backup found but passphrase is not configured" "$(basename "${latest}")" "${source}"
+  restore_archive="${workdir}/$(basename "${latest%.enc}")"
+  openssl enc -d -aes-256-cbc -pbkdf2 \
+    -in "${latest}" \
+    -out "${restore_archive}" \
+    -pass env:ALANET_BACKUP_ENCRYPTION_PASSPHRASE || fail "cannot decrypt external backup" "$(basename "${latest}")" "${source}"
+fi
+
+tar -xzf "${restore_archive}" -C "${workdir}" billing.sql.gz || fail "cannot extract billing.sql.gz from $(basename "${restore_archive}")" "$(basename "${latest}")" "${source}"
+[[ -s "${workdir}/billing.sql.gz" ]] || fail "billing.sql.gz is empty" "$(basename "${latest}")" "${source}"
+
+docker run -d --name "${container}" \
+  -e POSTGRES_DB="${db_name}" \
+  -e POSTGRES_USER="${db_user}" \
+  -e POSTGRES_PASSWORD="${db_password}" \
+  postgres:16-alpine >/dev/null
+
+stable_ready=0
+for _ in $(seq 1 90); do
+  if docker exec "${container}" psql -U "${db_user}" -d "${db_name}" -Atqc "select 1" >/dev/null 2>&1; then
+    stable_ready=$((stable_ready + 1))
+    [[ "${stable_ready}" -ge 2 ]] && break
+  else
+    stable_ready=0
+  fi
+  sleep 1
+done
+[[ "${stable_ready}" -ge 2 ]] || fail "temporary PostgreSQL did not become ready" "$(basename "${latest}")" "${source}"
+
+gzip -dc "${workdir}/billing.sql.gz" | docker exec -i "${container}" psql -v ON_ERROR_STOP=1 -U "${db_user}" -d "${db_name}" >/tmp/alanet-restore-test.psql.log 2>&1 || fail "restore failed; see /tmp/alanet-restore-test.psql.log" "$(basename "${latest}")" "${source}"
+
+query() {
+  docker exec "${container}" psql -U "${db_user}" -d "${db_name}" -Atq -c "$1"
+}
+
+tables="$(query "select count(*) from information_schema.tables where table_schema='public';")"
+customers="$(query "select case when to_regclass('public.customers') is null then -1 else (select count(*) from customers) end;")"
+orders="$(query "select case when to_regclass('public.orders') is null then -1 else (select count(*) from orders) end;")"
+subscriptions="$(query "select case when to_regclass('public.subscriptions') is null then -1 else (select count(*) from subscriptions) end;")"
+payments="$(query "select case when to_regclass('public.payments') is null then -1 else (select count(*) from payments) end;")"
+
+[[ "${tables}" =~ ^[0-9]+$ && "${tables}" -gt 0 ]] || fail "restored table count is invalid: ${tables}" "$(basename "${latest}")" "${source}"
+for value in "${customers}" "${orders}" "${subscriptions}" "${payments}"; do
+  [[ "${value}" =~ ^-?[0-9]+$ && "${value}" -ge 0 ]] || fail "required table missing after restore" "$(basename "${latest}")" "${source}"
+done
+
+message=$(
+  cat <<EOF
+ALANET restore-test OK
+Source: ${source}
+Backup: $(basename "${latest}")
+Tables: ${tables}
+Customers: ${customers}
+Orders: ${orders}
+Subscriptions: ${subscriptions}
+Payments: ${payments}
+EOF
+)
+json_status "ok" "restore test passed" "$(basename "${latest}")" "${tables}" "${customers}" "${orders}" "${subscriptions}" "${payments}" "${source}"
+send_admin "${message}"
+echo "restore_test_ok=$(basename "${latest}") source=${source} tables=${tables} customers=${customers} orders=${orders} subscriptions=${subscriptions} payments=${payments}"

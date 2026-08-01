@@ -7,11 +7,12 @@ from datetime import UTC, datetime
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from .config import get_settings
 from .db import get_session
-from .models import AuditLog, Customer, Order, OrderStatus, Plan, Subscription
+from .models import AuditLog, Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus
+from .remnawave_registry import load_node_registry
 from .notifications import notify_admin
 from .schemas import CheckoutRequest, CheckoutResponse, RenewalCheckoutRequest, TelegramSessionExchangeRequest
 from .services import accept_yookassa_webhook, create_checkout, exchange_web_login_token, get_web_session
@@ -54,6 +55,63 @@ async def rate_limit(request: Request, call_next):
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/v1/status")
+async def public_status(session: AsyncSession = Depends(get_session)) -> dict[str, object]:
+    checked_at = datetime.now(UTC).isoformat()
+    services: list[dict[str, object]] = [
+        {"name": "api", "status": "ok", "detail": "health endpoint is available"},
+    ]
+    try:
+        customers = await session.scalar(select(func.count()).select_from(Customer)) or 0
+        active_subscriptions = await session.scalar(select(func.count()).select_from(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE)) or 0
+        active_orders = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.ACTIVE)) or 0
+        succeeded_payments = await session.scalar(select(func.count()).select_from(Payment).where(Payment.status == "succeeded")) or 0
+        failed_orders = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.PROVISIONING_FAILED)) or 0
+        services.append(
+            {
+                "name": "billing-db",
+                "status": "ok",
+                "detail": f"customers={customers}, active_subscriptions={active_subscriptions}, active_orders={active_orders}, succeeded_payments={succeeded_payments}, failed_orders={failed_orders}",
+            }
+        )
+    except Exception:
+        log.exception("public_status_db_failed")
+        services.append({"name": "billing-db", "status": "degraded", "detail": "database check failed"})
+
+    try:
+        registry = load_node_registry()
+        nodes = registry.get("nodes") or []
+        active_nodes = sum(1 for node in nodes if node.get("status") == "active")
+        services.append(
+            {
+                "name": "node-registry",
+                "status": "ok",
+                "detail": f"active_nodes={active_nodes}, total_nodes={len(nodes)}",
+            }
+        )
+    except Exception:
+        log.exception("public_status_registry_failed")
+        services.append({"name": "node-registry", "status": "degraded", "detail": "registry file unavailable"})
+
+    services.append(
+        {
+            "name": "payments",
+            "status": "ok" if settings.yookassa_enabled else "degraded",
+            "detail": "YooKassa enabled" if settings.yookassa_enabled else "YooKassa is not configured",
+        }
+    )
+    services.append(
+        {
+            "name": "telegram",
+            "status": "ok" if settings.telegram_webhook_secret.get_secret_value() else "degraded",
+            "detail": "webhook secret configured" if settings.telegram_webhook_secret.get_secret_value() else "webhook secret missing",
+        }
+    )
+
+    overall = "ok" if all(service["status"] == "ok" for service in services) else "degraded"
+    return {"status": overall, "checked_at": checked_at, "services": services}
 
 
 def session_cookie_kwargs() -> dict:

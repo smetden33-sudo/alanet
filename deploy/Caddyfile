@@ -35,6 +35,20 @@ api.alanet.ru {
 	reverse_proxy api:8000
 }
 
+staging.alanet.ru, account-staging.alanet.ru {
+	import security
+	import block-sensitive-paths
+	encode zstd gzip
+	reverse_proxy alanet-staging-web:3000
+}
+
+api-staging.alanet.ru {
+	import security
+	import block-sensitive-paths
+	encode zstd gzip
+	reverse_proxy alanet-staging-api:8000
+}
+
 panel.alanet.ru {
 	import security
 	import block-sensitive-paths

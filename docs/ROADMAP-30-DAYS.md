@@ -6,6 +6,8 @@ Production: `alanet.ru`
 
 Актуализация 28 июля 2026 года: техническая часть плана развернута и проверена. Подробный протокол, тесты и внешние блокеры находятся в [ROADMAP-30-DAY-REPORT-2026-07-28.md](./ROADMAP-30-DAY-REPORT-2026-07-28.md). Публичная форма оплаты на сайте остается выключенной до заполнения реальных реквизитов продавца и юридической проверки; Telegram-продажа и production-интеграция ЮKassa сохранены.
 
+Актуализация 1 августа 2026 года: добавлена публичная страница статуса `/status` и backend endpoint `/api/v1/status`. Для браузерного просмотра теперь есть отдельная сводка по API, биллингу, нодам и платежам.
+
 ## Цели на 30 дней
 
 1. Зафиксировать и стабилизировать текущую production-инфраструктуру.
@@ -21,6 +23,26 @@ Production: `alanet.ru`
 - 🟡 Реализовано частично или требует дополнительного усиления.
 - ⬜ Запланировано.
 - ⛔ Заблокировано внешней зависимостью.
+
+## Сводка первых 15 дней
+
+| День | Цель | Артефакт | Ready | Risk |
+|---|---|---|---|---|
+| 1 | Аудит prod и карта рисков | `PRODUCTION-RISK-MAP-2026-07-31.md`, `PRODUCTION-INVENTORY.md` | Да | Скрытые ручные настройки и старые секреты |
+| 2 | Авторизация и админ-доступы | Telegram admin ID, `/admin`, `/stats`, `/user`, `/grant`, `/extend`, `/revoke` | Да | Слишком широкий доступ без RBAC |
+| 3 | Бэкапы и rollback | `BACKUP-SCHEDULE-2026-08-01.md`, restore-test | Да | Рост диска и деградация backup storage |
+| 4 | YooKassa и provisioning | webhook, metadata check, retry provisioning, finance reconciliation | Да | Неполные данные merchant / staging gap |
+| 5 | Единый клиент Telegram + web | HttpOnly web-session, `/account`, bind token | Да | Ошибка привязки личности |
+| 6 | Trial и первый путь клиента | trial plan, 24h access, no email step in bot | Да | Злоупотребление пробным доступом |
+| 7 | Админ-MVP | `/admin`, `/stats`, `/orders`, `/nodes` | Да | Ручные действия без аудита |
+| 8 | Жизненный цикл подписки | renew/expire/disable flow | Частично | Нужны дополнительные E2E-тесты тарифов |
+| 9 | Incident mode health-check | пороги для `/api`, host-портов и load | Да | Шумные ложные алерты |
+| 10 | Node registry sync | `infra/node-registry.json`, drift report | Да | Несовпадение с Remnawave contract |
+| 11 | Public status page | `/api/v1/status`, `/status` | В работе | Нужна проверка внешнего UX |
+| 12 | Внешние зашифрованные backup’ы | S3/rclone, external backup flow | Да | Безопасность ключей хранилища |
+| 13 | IaC для новых нод | Terraform/Ansible scaffold | Частично | Опасный rollout на shared VPS |
+| 14 | Безопасность и антифрод | secrets rotation, trial limits, audit | Частично | Операционная сложность |
+| 15 | Документация и эксплуатация | living roadmap, runbooks, summary tables | В работе | Расхождение между docs и prod |
 
 ## Текущее состояние production
 
@@ -114,6 +136,7 @@ Production: `alanet.ru`
 - ✅ Включить создание платежа, возврат пользователя и webhook `payment.succeeded`.
 - ✅ Проверять сумму, валюту, идентификаторы заказа, клиента и тарифа в metadata.
 - ✅ Сделать обработку webhook идемпотентной: повторное событие не должно создавать вторую подписку или повторно продлевать доступ.
+- ✅ Добавить ежедневную финансовую сверку YooKassa: суммы, статусы, metadata, `paid but not ACTIVE`, `ACTIVE without succeeded payment`.
 - ✅ Реализовать состояния заказа: `CREATED`, `PAYMENT_PENDING`, `PAID`, `PROVISIONING`, `ACTIVE`, `PROVISIONING_FAILED`, `REFUNDED`.
 - ⬜ Проверить все платные тарифы: 30, 90 и 365 дней.
 - ✅ Добавить повтор provisioning без повторного списания денег.
@@ -178,10 +201,15 @@ Production: `alanet.ru`
 - ✅ Проверять контейнеры, TLS, webhook и подписки каждые 5 минут.
 - ✅ Добавить Telegram-оповещение при падении ноды или критичного сервиса.
 - ✅ Добавить защиту от повторяющихся оповещений и сообщение о восстановлении.
+- ✅ Внедрить Incident mode для health-check: `ok`, `warning`, `degraded`, `incident`.
+- ✅ Для `/api`, host-портов Remnawave и load average считать аварию только после повторов, по умолчанию 3 проверки подряд.
+- ✅ Убрать шумные алерты вида "health-check failed on line N" для известных эксплуатационных проверок.
+- ✅ Добавить понятный `Impact` в Telegram-алерты, чтобы сразу было видно, что страдает: оплаты, бот, подписки, локация или публичный сайт.
 - ✅ Контролировать CPU, RAM, диск, load average и срок действия SSL.
 - ✅ Настроить ротацию Docker-логов и лимиты хранения.
 - ✅ Описать безопасный перезапуск каждого сервиса.
 - ✅ Описать замену или вывод ноды без нарушения другого проекта на совместно используемом VPS.
+- ✅ Добавить Remnawave registry sync: сравнение `infra/node-registry.json` с `/api/nodes` и `/api/hosts`, drift-report в Telegram и ежедневном audit report, опасные изменения — только report-only.
 
 Критерий готовности: критичная неисправность обнаруживается автоматически, администратор получает понятное сообщение и инструкцию восстановления.
 

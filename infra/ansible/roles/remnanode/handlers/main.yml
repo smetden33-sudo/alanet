@@ -1,0 +1,5 @@
+- name: Restart remnanode
+  ansible.builtin.command: docker compose --env-file .env -f docker-compose.yml up -d
+  args:
+    chdir: "{{ remnanode_install_dir }}"
+  changed_when: true

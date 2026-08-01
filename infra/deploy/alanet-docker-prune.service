@@ -1,0 +1,8 @@
+[Unit]
+Description=ALANET Docker safe prune
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/alanet-docker-prune

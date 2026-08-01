@@ -1,13 +1,8 @@
 name: alanet
 services:
   web:
-    build:
-      context: ..
-      dockerfile: Dockerfile.web
-      args:
-        NEXT_PUBLIC_API_URL: https://api.alanet.ru
-        NEXT_PUBLIC_SITE_URL: https://account.alanet.ru
-        NEXT_PUBLIC_CHECKOUT_ENABLED: "false"
+    image: ${ALANET_WEB_IMAGE:-ghcr.io/alanet/alanet-web:latest}
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "127.0.0.1:3100:3000"
@@ -45,9 +40,14 @@ services:
           memory: 96M
 
   api:
-    build: ../backend
+    image: ${ALANET_BACKEND_IMAGE:-ghcr.io/alanet/alanet-backend:latest}
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - ../infra/node-registry.json:/opt/alanet/infra/node-registry.json:ro
+      - /var/lib/alanet-monitor:/var/lib/alanet-monitor:ro
+      - /var/backups/alanet:/var/backups/alanet:ro
     depends_on:
       billing-db:
         condition: service_healthy
@@ -65,9 +65,14 @@ services:
           memory: 256M
 
   worker:
-    build: ../backend
+    image: ${ALANET_BACKEND_IMAGE:-ghcr.io/alanet/alanet-backend:latest}
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - ../infra/node-registry.json:/opt/alanet/infra/node-registry.json:ro
+      - /var/lib/alanet-monitor:/var/lib/alanet-monitor:ro
+      - /var/backups/alanet:/var/backups/alanet:ro
     depends_on:
       billing-db:
         condition: service_healthy

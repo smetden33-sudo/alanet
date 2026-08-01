@@ -1,0 +1,43 @@
+- name: Reset UFW policy for fresh Terraform-managed nodes
+  ansible.builtin.command: ufw --force reset
+  changed_when: true
+  when: manage_firewall | bool
+
+- name: Deny incoming traffic by default
+  ansible.builtin.command: ufw default deny incoming
+  changed_when: true
+  when: manage_firewall | bool
+
+- name: Allow outgoing traffic by default
+  ansible.builtin.command: ufw default allow outgoing
+  changed_when: true
+  when: manage_firewall | bool
+
+- name: Allow SSH from admin CIDRs
+  ansible.builtin.command: "ufw allow from {{ item }} to any port {{ ssh_port }} proto tcp comment 'ALANET SSH'"
+  changed_when: true
+  loop: "{{ admin_cidrs | default(['0.0.0.0/0']) }}"
+  when: manage_firewall | bool
+
+- name: Allow RemnaNode control port from control plane
+  ansible.builtin.command: "ufw allow from {{ item }} to any port {{ remnanode_port }} proto tcp comment 'ALANET RemnaNode control'"
+  changed_when: true
+  loop: "{{ remnanode_control_allowed_cidrs }}"
+  when: manage_firewall | bool
+
+- name: Allow public VPN TCP ports
+  ansible.builtin.command: "ufw allow {{ item }}/tcp comment 'ALANET VPN TCP'"
+  changed_when: true
+  loop: "{{ vpn_public_tcp_ports }}"
+  when: manage_firewall | bool
+
+- name: Allow public VPN UDP ports
+  ansible.builtin.command: "ufw allow {{ item }}/udp comment 'ALANET VPN UDP'"
+  changed_when: true
+  loop: "{{ vpn_public_udp_ports }}"
+  when: manage_firewall | bool
+
+- name: Enable UFW
+  ansible.builtin.command: ufw --force enable
+  changed_when: true
+  when: manage_firewall | bool

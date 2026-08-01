@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .config import Settings
 from .integrations.remnawave import RemnawaveClient
 from .integrations.yookassa import YooKassaClient
+from .notifications import notify_admin
 from .models import AuditLog, Customer, Order, OrderStatus, Payment, Plan, Subscription, SubscriptionStatus, TelegramBindToken, WebLoginToken, WebSession, WebhookEvent
 
 
@@ -212,7 +213,7 @@ async def accept_yookassa_webhook(session: AsyncSession, settings: Settings, pay
     payment.paid_at = datetime.fromisoformat(verified["captured_at"].replace("Z", "+00:00")) if verified.get("captured_at") else datetime.now(UTC)
     await session.commit()
     try:
-        await provision_order(session, settings, order.id)
+        subscription = await provision_order(session, settings, order.id)
     except Exception:
         order = await session.get(Order, order.id)
         if order:
@@ -227,6 +228,18 @@ async def accept_yookassa_webhook(session: AsyncSession, settings: Settings, pay
         event.processing_status = "PROCESSED"
         event.processed_at = datetime.now(UTC)
     await session.commit()
+    customer = await session.get(Customer, order.customer_id)
+    plan = await session.get(Plan, order.plan_id)
+    if customer and plan:
+        customer_label = customer.telegram_username or (f"TG {customer.telegram_id}" if customer.telegram_id else customer.email)
+        await notify_admin(
+            settings,
+            "ALANET: payment confirmed and subscription activated.\n"
+            f"Client: {customer_label}\n"
+            f"Plan: {plan.name}\n"
+            f"Valid until: {subscription.expires_at.astimezone().strftime('%d.%m.%Y %H:%M')}\n"
+            f"Payment ID: {payment_id}",
+        )
     return "processed"
 
 
@@ -285,6 +298,18 @@ async def provision_order(session: AsyncSession, settings: Settings, order_id: u
             failed.status = OrderStatus.PROVISIONING_FAILED
             failed.expires_at = failed.expires_at or expiry
             await session.commit()
+            customer = await session.get(Customer, failed.customer_id)
+            plan = await session.get(Plan, failed.plan_id)
+            if customer and plan:
+                customer_label = customer.telegram_username or (f"TG {customer.telegram_id}" if customer.telegram_id else customer.email)
+                await notify_admin(
+                    settings,
+                    "ALANET: provisioning failed.\n"
+                    f"Client: {customer_label}\n"
+                    f"Plan: {plan.name}\n"
+                    f"Order ID: {failed.id}\n"
+                    f"Expires at: {failed.expires_at.astimezone().strftime('%d.%m.%Y %H:%M') if failed.expires_at else 'n/a'}",
+                )
         raise
 
 

@@ -1,0 +1,92 @@
+name: alanet-staging
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: ${STAGING_PUBLIC_API_URL:-https://api-staging.alanet.ru}
+        NEXT_PUBLIC_SITE_URL: ${STAGING_PUBLIC_SITE_URL:-https://staging.alanet.ru}
+        NEXT_PUBLIC_CHECKOUT_ENABLED: "true"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3110:3000"
+    networks:
+      default:
+      remnawave-network:
+        aliases:
+          - alanet-staging-web
+
+  billing-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: billing_staging
+      POSTGRES_USER: billing
+      POSTGRES_PASSWORD: ${STAGING_BILLING_DB_PASSWORD}
+    volumes:
+      - billing-staging-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U billing -d billing_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  billing-redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
+
+  remnawave-mock:
+    image: python:3.12-slim
+    restart: unless-stopped
+    working_dir: /app
+    command: ["sh", "-c", "pip install --no-cache-dir fastapi==0.115.12 uvicorn==0.34.2 >/tmp/pip.log 2>&1 && uvicorn mock-remnawave:app --host 0.0.0.0 --port 8080"]
+    volumes:
+      - ./mock-remnawave.py:/app/mock-remnawave.py:ro
+    ports:
+      - "127.0.0.1:8011:8080"
+
+  api:
+    build: ../backend
+    restart: unless-stopped
+    env_file: .env.staging
+    depends_on:
+      billing-db:
+        condition: service_healthy
+      billing-redis:
+        condition: service_started
+      remnawave-mock:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8010:8000"
+    command: ["sh", "-c", "alembic upgrade head && python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1"]
+    networks:
+      default:
+      remnawave-network:
+        aliases:
+          - alanet-staging-api
+
+  worker:
+    build: ../backend
+    restart: unless-stopped
+    env_file: .env.staging
+    depends_on:
+      billing-db:
+        condition: service_healthy
+      billing-redis:
+        condition: service_started
+      remnawave-mock:
+        condition: service_started
+    command: ["celery", "-A", "app.worker.celery", "worker", "-B", "--loglevel=INFO", "--concurrency=1"]
+    networks:
+      - default
+      - remnawave-network
+
+volumes:
+  billing-staging-data:
+
+networks:
+  remnawave-network:
+    external: true
