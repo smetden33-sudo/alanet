@@ -119,13 +119,11 @@ GitHub Actions secrets required for auto-deploy:
 - `PROD_USER`
 - `PROD_SSH_PORT`
 - `PROD_SSH_KEY`
-- `GHCR_USERNAME`
-- `GHCR_TOKEN`
 
 Release flow:
 
 1. Push to `main` or run the CI workflow manually.
-2. CI builds `web` and `backend` images and publishes `latest` plus a commit SHA tag.
+2. CI builds `web` and `backend` images and publishes `latest` plus a commit SHA tag to GHCR.
 3. Production runs `docker compose pull web api worker`.
 4. Production runs `docker compose up -d --no-deps web api worker`.
 5. `alanet-healthcheck.service` must return `ok`.

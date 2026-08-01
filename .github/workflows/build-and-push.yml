@@ -87,9 +87,7 @@ jobs:
           PROD_HOST: ${{ secrets.PROD_HOST }}
           PROD_USER: ${{ secrets.PROD_USER }}
           PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
           IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; cd /opt/alanet/deploy; echo '$GHCR_TOKEN' | sudo docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose pull web api worker; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose up -d --no-deps web api worker; sudo docker compose ps web api worker; sudo systemctl start alanet-healthcheck.service; sudo journalctl -u alanet-healthcheck.service -n 40 --no-pager -o cat"
+          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; cd /opt/alanet/deploy; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose pull web api worker; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose up -d --no-deps web api worker; sudo docker compose ps web api worker; sudo systemctl start alanet-healthcheck.service; sudo journalctl -u alanet-healthcheck.service -n 40 --no-pager -o cat"
