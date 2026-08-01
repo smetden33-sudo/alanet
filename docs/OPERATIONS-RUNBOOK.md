@@ -113,6 +113,15 @@ REMNAWAVE_TOKEN="..." \
 Production web/API images are built outside the VPS by CI and pushed to a registry.
 The production `.env` points `ALANET_WEB_IMAGE` and `ALANET_BACKEND_IMAGE` at the published tags.
 
+GitHub Actions secrets required for auto-deploy:
+
+- `PROD_HOST`
+- `PROD_USER`
+- `PROD_SSH_PORT`
+- `PROD_SSH_KEY`
+- `GHCR_USERNAME`
+- `GHCR_TOKEN`
+
 Release flow:
 
 1. Push to `main` or run the CI workflow manually.
