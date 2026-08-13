@@ -1,0 +1,6 @@
+[Unit]
+Description=ALANET disk usage report collector
+
+[Service]
+Type=oneshot
+ExecStart=/opt/alanet/infra/deploy/alanet-disk-report

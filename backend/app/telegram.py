@@ -421,6 +421,7 @@ async def admin_menu(message: Message) -> None:
         "/health — полная диагностика\n"
         "/ports — проверка host-портов Remnawave\n"
         "/backup — статус последнего бэкапа\n"
+        "/disk — место на prod и безопасная очистка\n"
         "/audit [дни] — журнал админских и системных действий\n"
         "/stats — статистика клиентов и заказов\n"
         "/user <telegram_id|@username|email> — карточка клиента\n"
@@ -868,6 +869,79 @@ async def admin_backup(message: Message) -> None:
     if not await require_admin(message):
         return
     await message.answer(latest_backup_status_line())
+
+
+def _format_bytes(value: int | float | None) -> str:
+    if value is None:
+        return "?"
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if abs(size) < 1024 or unit == units[-1]:
+            return f"{size:.1f} {unit}" if unit != "B" else f"{size:.0f} B"
+        size /= 1024
+    return f"{size:.1f} TB"
+
+
+def disk_status_lines() -> list[str]:
+    status = _read_monitor_status("disk.status.json")
+    if not status:
+        return [
+            "Disk prod: статус не найден.",
+            "Collector должен писать /var/lib/alanet-monitor/disk.status.json.",
+            "Ручная проверка на prod: df -h / && docker system df",
+        ]
+
+    fresh, age = _format_status_age(status.get("timestamp"))
+    root = status.get("root") or {}
+    used_percent = root.get("used_percent")
+    status_name = status.get("status") or "unknown"
+    badge = "OK" if status_name == "ok" else "WARN" if status_name == "warning" else "INCIDENT"
+
+    lines = [
+        f"Disk prod: {badge}",
+        f"Age: {age}{'' if fresh else ' (stale)'}",
+        f"/: {used_percent if used_percent is not None else '?'}% used, free {_format_bytes(root.get('free_bytes'))} of {_format_bytes(root.get('total_bytes'))}",
+    ]
+
+    top_dirs = status.get("top_dirs") or {}
+    for path in ["/var", "/opt", "/var/lib/containerd"]:
+        entries = top_dirs.get(path) or []
+        lines.append(f"Top {path}:")
+        if not entries:
+            lines.append("- no data")
+            continue
+        for item in entries[:6]:
+            lines.append(f"- {_format_bytes(item.get('bytes'))} {item.get('path')}")
+
+    docker = status.get("docker") or {}
+    lines.append("Docker:")
+    if docker:
+        for key in ["images", "containers", "volumes", "build_cache"]:
+            item = docker.get(key) or {}
+            size = item.get("size") or item.get("total") or "?"
+            reclaimable = item.get("reclaimable") or "?"
+            lines.append(f"- {key}: {size}, reclaimable {reclaimable}")
+    else:
+        lines.append("- no data")
+
+    lines.append("Safe cleanup:")
+    safe_cleanup = status.get("safe_cleanup") or []
+    if safe_cleanup:
+        lines.extend(f"- {item}" for item in safe_cleanup)
+    else:
+        lines.append("- nothing obvious")
+    return lines
+
+
+@router.message(Command("disk"))
+async def admin_disk(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await send_admin_lines(message, disk_status_lines())
 
 
 @router.message(Command("audit"))

@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+monitor_dir="${ALANET_MONITOR_DIR:-/var/lib/alanet-monitor}"
+status_file="${monitor_dir}/disk.status.json"
+tmp_file="${status_file}.tmp"
+warning_threshold="${ALANET_DISK_WARNING_THRESHOLD:-85}"
+incident_threshold="${ALANET_DISK_INCIDENT_THRESHOLD:-92}"
+
+mkdir -p "${monitor_dir}"
+
+python3 - <<'PY' "${tmp_file}" "${warning_threshold}" "${incident_threshold}"
+import json
+import os
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+
+status_path = sys.argv[1]
+warning_threshold = int(sys.argv[2])
+incident_threshold = int(sys.argv[3])
+
+
+def run(command: list[str], timeout: int = 20) -> str:
+    try:
+        return subprocess.check_output(command, stderr=subprocess.DEVNULL, text=True, timeout=timeout)
+    except Exception:
+        return ""
+
+
+def du_top(path: str, limit: int = 8) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    output = run(["du", "-x", "-B1", "-d1", path], timeout=45)
+    entries: list[dict] = []
+    for line in output.splitlines():
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2:
+            continue
+        try:
+            size = int(parts[0])
+        except ValueError:
+            continue
+        entries.append({"bytes": size, "path": parts[1]})
+    entries.sort(key=lambda item: item["bytes"], reverse=True)
+    return entries[:limit]
+
+
+def docker_system_df() -> dict:
+    output = run(["docker", "system", "df"], timeout=20)
+    result: dict[str, dict[str, str]] = {}
+    mapping = {
+        "Images": "images",
+        "Containers": "containers",
+        "Local Volumes": "volumes",
+        "Build Cache": "build_cache",
+    }
+    for line in output.splitlines():
+        if not line or line.startswith("TYPE"):
+            continue
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        if parts[0] == "Local" and len(parts) >= 5 and parts[1] == "Volumes":
+            source = "Local Volumes"
+            total = parts[2]
+            active = parts[3]
+            size = parts[4]
+            reclaimable = " ".join(parts[5:]) if len(parts) > 5 else "?"
+        elif parts[0] == "Build" and len(parts) >= 5 and parts[1] == "Cache":
+            source = "Build Cache"
+            total = parts[2]
+            active = parts[3]
+            size = parts[4]
+            reclaimable = " ".join(parts[5:]) if len(parts) > 5 else "?"
+        else:
+            source = parts[0]
+            total = parts[1] if len(parts) > 1 else "?"
+            active = parts[2] if len(parts) > 2 else "?"
+            size = parts[3] if len(parts) > 3 else "?"
+            reclaimable = " ".join(parts[4:]) if len(parts) > 4 else "?"
+        key = mapping.get(source)
+        if key:
+            result[key] = {"total": total, "active": active, "size": size, "reclaimable": reclaimable}
+    return result
+
+
+usage = shutil.disk_usage("/")
+used = usage.total - usage.free
+used_percent = round(used * 100 / usage.total)
+if used_percent >= incident_threshold:
+    status = "incident"
+elif used_percent >= warning_threshold:
+    status = "warning"
+else:
+    status = "ok"
+
+docker = docker_system_df()
+safe_cleanup = [
+    "docker image prune -f",
+    "docker system prune -af --volumes",
+    "apt-get clean",
+    "journalctl --vacuum-time=7d",
+    "remove stale /tmp maintenance files",
+]
+if status == "ok":
+    safe_cleanup = ["monitor only"]
+
+payload = {
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "status": status,
+    "thresholds": {"warning_percent": warning_threshold, "incident_percent": incident_threshold},
+    "root": {
+        "total_bytes": usage.total,
+        "used_bytes": used,
+        "free_bytes": usage.free,
+        "used_percent": used_percent,
+    },
+    "top_dirs": {
+        "/var": du_top("/var"),
+        "/opt": du_top("/opt"),
+        "/var/lib/containerd": du_top("/var/lib/containerd"),
+    },
+    "docker": docker,
+    "safe_cleanup": safe_cleanup,
+}
+
+with open(status_path, "w", encoding="utf-8") as fh:
+    json.dump(payload, fh, ensure_ascii=False, indent=2)
+    fh.write("\n")
+PY
+
+chmod 0644 "${tmp_file}"
+mv "${tmp_file}" "${status_file}"

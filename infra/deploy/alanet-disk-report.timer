@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ALANET disk usage report collector every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=1min
+Unit=alanet-disk-report.service
+
+[Install]
+WantedBy=timers.target

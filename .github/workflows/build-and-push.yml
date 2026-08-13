@@ -10,6 +10,9 @@ on:
       - "package.json"
       - "package-lock.json"
       - "backend/requirements.txt"
+      - "infra/deploy/alanet-disk-report"
+      - "infra/deploy/alanet-disk-report.service"
+      - "infra/deploy/alanet-disk-report.timer"
       - ".github/workflows/build-and-push.yml"
   workflow_dispatch:
 
@@ -90,6 +93,8 @@ jobs:
           IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
+          scp -P "$PROD_SSH_PORT" infra/deploy/alanet-disk-report infra/deploy/alanet-disk-report.service infra/deploy/alanet-disk-report.timer "$PROD_USER@$PROD_HOST:/tmp/"
+          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; bash -n /tmp/alanet-disk-report; sudo mkdir -p /opt/alanet/infra/deploy /var/lib/alanet-monitor; sudo install -m 0755 /tmp/alanet-disk-report /opt/alanet/infra/deploy/alanet-disk-report; sudo install -m 0644 /tmp/alanet-disk-report.service /etc/systemd/system/alanet-disk-report.service; sudo install -m 0644 /tmp/alanet-disk-report.timer /etc/systemd/system/alanet-disk-report.timer; sudo systemctl daemon-reload; sudo systemctl enable --now alanet-disk-report.timer; sudo systemctl start alanet-disk-report.service; sudo python3 -m json.tool /var/lib/alanet-monitor/disk.status.json >/dev/null"
           ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; cd /opt/alanet/deploy; sudo docker image prune -af || true; sudo docker builder prune -af || true; sudo docker container prune -f || true; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose pull web api worker; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose up -d --no-deps web api worker; sudo docker image prune -af || true; sudo docker builder prune -af || true; sudo docker container prune -f || true; sudo docker compose ps web api worker"
           for attempt in 1 2 3 4 5; do
             if ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "sudo systemctl start alanet-healthcheck.service"; then
