@@ -256,6 +256,25 @@ else
   add_warning "Disk collector report is missing. Impact: /disk command has no detailed prod disk data."
 fi
 
+prod_ops_status_file="${monitor_state_dir}/prod-ops.status.json"
+if [[ -f "${prod_ops_status_file}" ]]; then
+  prod_ops_age="$(( $(date +%s) - $(stat -c %Y "${prod_ops_status_file}") ))"
+  prod_ops_status="$(jq -r '.status // "unknown"' "${prod_ops_status_file}" 2>/dev/null || printf 'unknown')"
+  printf 'prod_ops_status=%s_age_%ss\n' "${prod_ops_status}" "${prod_ops_age}"
+  if (( prod_ops_age > 900 )); then
+    add_degraded "Prod ops collector is stale (${prod_ops_age}s). Impact: network/IO/reboot monitoring may be blind."
+  elif [[ "${prod_ops_status}" == "incident" ]]; then
+    prod_ops_problem="$(jq -r '.problems[]? | select(.severity == "incident") | .message' "${prod_ops_status_file}" 2>/dev/null | head -n 1)"
+    add_degraded "Prod ops collector reports incident: ${prod_ops_problem:-see /var/lib/alanet-monitor/prod-ops.status.json}."
+  elif [[ "${prod_ops_status}" == "warning" ]]; then
+    prod_ops_problem="$(jq -r '.problems[]? | .message' "${prod_ops_status_file}" 2>/dev/null | head -n 1)"
+    add_warning "Prod ops collector warning: ${prod_ops_problem:-see /var/lib/alanet-monitor/prod-ops.status.json}."
+  fi
+else
+  printf 'prod_ops_status=missing\n'
+  add_warning "Prod ops collector report is missing. Impact: network/IO/reboot monitoring is not available yet."
+fi
+
 if webhook_json="$(curl --fail --silent --show-error "https://api.telegram.org/bot${telegram_token}/getWebhookInfo" 2>/dev/null)"; then
   webhook_url="$(jq -r '.result.url // empty' <<<"${webhook_json}")"
   if [[ "${webhook_url}" == "https://api.alanet.ru/webhooks/telegram" ]]; then

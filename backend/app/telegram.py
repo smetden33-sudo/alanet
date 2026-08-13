@@ -731,6 +731,7 @@ async def admin_health(message: Message) -> None:
     except Exception as exc:
         log.exception("admin_health_remnawave_failed")
         lines.append(f"{ok_bad(False)} Remnawave: {type(exc).__name__}")
+    lines.extend(prod_ops_status_lines())
     lines.extend(backup_status_lines())
     await send_admin_lines(message, lines)
 
@@ -797,6 +798,65 @@ def _read_monitor_status(name: str) -> dict | None:
     except Exception:
         log.exception("monitor_status_read_failed", path=str(status_path))
         return {"status": "failed", "message": "status json не читается", "path": str(status_path)}
+
+
+def _format_rate_bps(value: int | float | None) -> str:
+    if value is None:
+        return "warming up"
+    try:
+        bps = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    mbps = bps * 8 / 1024 / 1024
+    if mbps >= 1:
+        return f"{mbps:.1f} Mbps"
+    return f"{bps / 1024:.1f} KB/s"
+
+
+def _format_rate_bytes(value: int | float | None) -> str:
+    if value is None:
+        return "warming up"
+    try:
+        bps = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    mb = bps / 1024 / 1024
+    if mb >= 1:
+        return f"{mb:.1f} MB/s"
+    return f"{bps / 1024:.1f} KB/s"
+
+
+def prod_ops_status_lines() -> list[str]:
+    status = _read_monitor_status("prod-ops.status.json")
+    if not status:
+        return [
+            f"{ok_bad(False)} Prod ops collector: status not found",
+            "Expected: /var/lib/alanet-monitor/prod-ops.status.json",
+        ]
+
+    fresh, age = _format_status_age(status.get("timestamp"))
+    status_name = str(status.get("status") or "unknown")
+    ok = status_name == "ok" and fresh
+    badge = "OK" if status_name == "ok" else "WARN" if status_name == "warning" else "INCIDENT"
+    load = status.get("load") or {}
+    memory = status.get("memory") or {}
+    network_rates = status.get("network_rates") or {}
+    disk_rates = status.get("disk_rates") or {}
+    containers = status.get("containers") or {}
+    problems = status.get("problems") or []
+
+    lines = [
+        f"{ok_bad(ok)} Prod ops: {badge}, age {age}{'' if fresh else ' (stale)'}",
+        f"Load: {load.get('one', '?')} / {load.get('five', '?')} / {load.get('fifteen', '?')}",
+        f"RAM: {memory.get('used_percent', '?')}%",
+        f"Network: rx {_format_rate_bps(network_rates.get('rx_bps'))}, tx {_format_rate_bps(network_rates.get('tx_bps'))}",
+        f"Disk IO: read {_format_rate_bytes(disk_rates.get('read_bps'))}, write {_format_rate_bytes(disk_rates.get('write_bps'))}",
+        f"Containers: {containers.get('running_count', '?')} running",
+        f"Health freshness: {status.get('health_summary_age_seconds', '?')}s",
+    ]
+    for item in problems[:5]:
+        lines.append(f"- {item.get('severity', 'warning')}: {item.get('message', '')}")
+    return lines
 
 
 def backup_status_lines() -> list[str]:

@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+monitor_dir="${ALANET_MONITOR_DIR:-/var/lib/alanet-monitor}"
+status_file="${monitor_dir}/prod-ops.status.json"
+state_file="${monitor_dir}/prod-ops.state.json"
+tmp_file="${status_file}.tmp"
+
+load_warning_threshold="${ALANET_LOAD_WARNING_THRESHOLD:-2.0}"
+load_incident_threshold="${ALANET_LOAD_INCIDENT_THRESHOLD:-3.0}"
+memory_warning_threshold="${ALANET_MEMORY_WARNING_THRESHOLD:-85}"
+memory_incident_threshold="${ALANET_MEMORY_INCIDENT_THRESHOLD:-95}"
+uptime_reboot_threshold_seconds="${ALANET_UPTIME_REBOOT_THRESHOLD_SECONDS:-300}"
+health_summary_max_age_seconds="${ALANET_HEALTH_SUMMARY_MAX_AGE_SECONDS:-900}"
+network_high_mbps_warning="${ALANET_NETWORK_HIGH_MBPS_WARNING:-80}"
+disk_read_mbps_warning="${ALANET_DISK_READ_MBPS_WARNING:-80}"
+disk_write_mbps_warning="${ALANET_DISK_WRITE_MBPS_WARNING:-40}"
+expected_container_count="${ALANET_EXPECTED_CONTAINER_COUNT:-13}"
+
+mkdir -p "${monitor_dir}"
+
+python3 - <<'PY' \
+  "${tmp_file}" \
+  "${state_file}" \
+  "${load_warning_threshold}" \
+  "${load_incident_threshold}" \
+  "${memory_warning_threshold}" \
+  "${memory_incident_threshold}" \
+  "${uptime_reboot_threshold_seconds}" \
+  "${health_summary_max_age_seconds}" \
+  "${network_high_mbps_warning}" \
+  "${disk_read_mbps_warning}" \
+  "${disk_write_mbps_warning}" \
+  "${expected_container_count}"
+import json
+import os
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+status_path = Path(sys.argv[1])
+state_path = Path(sys.argv[2])
+load_warning = float(sys.argv[3])
+load_incident = float(sys.argv[4])
+memory_warning = int(sys.argv[5])
+memory_incident = int(sys.argv[6])
+uptime_reboot_seconds = int(sys.argv[7])
+health_summary_max_age = int(sys.argv[8])
+network_high_bps = float(sys.argv[9]) * 1024 * 1024 / 8
+disk_read_bps_warning = float(sys.argv[10]) * 1024 * 1024
+disk_write_bps_warning = float(sys.argv[11]) * 1024 * 1024
+expected_containers = int(sys.argv[12])
+now = time.time()
+
+
+def run(command: list[str], timeout: int = 10) -> str:
+    try:
+        return subprocess.check_output(command, stderr=subprocess.DEVNULL, text=True, timeout=timeout)
+    except Exception:
+        return ""
+
+
+def read_previous() -> dict:
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def read_mem_percent() -> int | None:
+    values: dict[str, int] = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, raw_value = line.split(":", 1)
+            values[key] = int(raw_value.strip().split()[0]) * 1024
+    except Exception:
+        return None
+    total = values.get("MemTotal")
+    available = values.get("MemAvailable")
+    if not total or available is None:
+        return None
+    return round((total - available) * 100 / total)
+
+
+def read_network() -> dict:
+    total_rx = 0
+    total_tx = 0
+    interfaces: dict[str, dict[str, int]] = {}
+    try:
+        lines = Path("/proc/net/dev").read_text(encoding="utf-8").splitlines()[2:]
+    except Exception:
+        return {"rx_bytes": 0, "tx_bytes": 0, "interfaces": {}}
+    for line in lines:
+        if ":" not in line:
+            continue
+        name, raw = line.split(":", 1)
+        name = name.strip()
+        if name == "lo":
+            continue
+        parts = raw.split()
+        if len(parts) < 16:
+            continue
+        rx = int(parts[0])
+        tx = int(parts[8])
+        interfaces[name] = {"rx_bytes": rx, "tx_bytes": tx}
+        total_rx += rx
+        total_tx += tx
+    return {"rx_bytes": total_rx, "tx_bytes": total_tx, "interfaces": interfaces}
+
+
+def read_diskstats() -> dict:
+    sectors_read = 0
+    sectors_written = 0
+    try:
+        lines = Path("/proc/diskstats").read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return {"read_bytes": 0, "write_bytes": 0}
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 14:
+            continue
+        name = parts[2]
+        if name.startswith(("loop", "ram", "sr", "fd")):
+            continue
+        if any(name.endswith(str(index)) for index in range(10)) and not name.startswith(("nvme", "mmcblk")):
+            continue
+        try:
+            sectors_read += int(parts[5])
+            sectors_written += int(parts[9])
+        except ValueError:
+            continue
+    return {"read_bytes": sectors_read * 512, "write_bytes": sectors_written * 512}
+
+
+def docker_containers() -> dict:
+    names = [line.strip() for line in run(["docker", "ps", "--format", "{{.Names}}"], timeout=15).splitlines() if line.strip()]
+    restarting = []
+    all_lines = run(["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}"], timeout=15).splitlines()
+    for line in all_lines:
+        parts = line.split("\t", 1)
+        if len(parts) == 2 and "Restarting" in parts[1]:
+            restarting.append(parts[0])
+    return {"running_count": len(names), "running": sorted(names), "restarting": sorted(restarting)}
+
+
+def add_problem(items: list[dict], severity: str, message: str) -> None:
+    items.append({"severity": severity, "message": message})
+
+
+previous = read_previous()
+network = read_network()
+diskstats = read_diskstats()
+containers = docker_containers()
+load_1m, load_5m, load_15m = os.getloadavg()
+memory_percent = read_mem_percent()
+uptime_seconds = int(float(Path("/proc/uptime").read_text(encoding="utf-8").split()[0]))
+health_summary = Path("/var/lib/alanet-monitor/health.summary")
+health_summary_age = int(now - health_summary.stat().st_mtime) if health_summary.exists() else None
+elapsed = max(1.0, now - float(previous.get("timestamp_epoch", now))) if previous else None
+problems: list[dict] = []
+
+net_rates = {"rx_bps": None, "tx_bps": None, "total_bps": None}
+disk_rates = {"read_bps": None, "write_bps": None}
+if elapsed:
+    previous_network = previous.get("network") or {}
+    previous_disk = previous.get("diskstats") or {}
+    rx_rate = max(0, network["rx_bytes"] - int(previous_network.get("rx_bytes", network["rx_bytes"]))) / elapsed
+    tx_rate = max(0, network["tx_bytes"] - int(previous_network.get("tx_bytes", network["tx_bytes"]))) / elapsed
+    read_rate = max(0, diskstats["read_bytes"] - int(previous_disk.get("read_bytes", diskstats["read_bytes"]))) / elapsed
+    write_rate = max(0, diskstats["write_bytes"] - int(previous_disk.get("write_bytes", diskstats["write_bytes"]))) / elapsed
+    net_rates = {"rx_bps": round(rx_rate), "tx_bps": round(tx_rate), "total_bps": round(rx_rate + tx_rate)}
+    disk_rates = {"read_bps": round(read_rate), "write_bps": round(write_rate)}
+    if rx_rate + tx_rate >= network_high_bps:
+        add_problem(problems, "warning", f"Network throughput is high: {(rx_rate + tx_rate) * 8 / 1024 / 1024:.1f} Mbps.")
+    if read_rate >= disk_read_bps_warning:
+        add_problem(problems, "warning", f"Disk read rate is high: {read_rate / 1024 / 1024:.1f} MB/s.")
+    if write_rate >= disk_write_bps_warning:
+        add_problem(problems, "warning", f"Disk write rate is high: {write_rate / 1024 / 1024:.1f} MB/s.")
+
+if load_1m >= load_incident:
+    add_problem(problems, "incident", f"Load 1m is {load_1m:.2f}, critical threshold {load_incident:.2f}.")
+elif load_1m >= load_warning:
+    add_problem(problems, "warning", f"Load 1m is {load_1m:.2f}, warning threshold {load_warning:.2f}.")
+
+if memory_percent is not None:
+    if memory_percent >= memory_incident:
+        add_problem(problems, "incident", f"Memory usage is {memory_percent}%, critical threshold {memory_incident}%.")
+    elif memory_percent >= memory_warning:
+        add_problem(problems, "warning", f"Memory usage is {memory_percent}%, warning threshold {memory_warning}%.")
+
+if uptime_seconds < uptime_reboot_seconds:
+    add_problem(problems, "incident", f"Prod was rebooted recently: uptime {uptime_seconds}s.")
+
+if health_summary_age is None:
+    add_problem(problems, "incident", "Health-check summary is missing.")
+elif health_summary_age > health_summary_max_age:
+    add_problem(problems, "incident", f"Health-check summary is stale: {health_summary_age}s.")
+
+if containers["running_count"] < expected_containers:
+    add_problem(problems, "incident", f"Running containers: {containers['running_count']}, expected at least {expected_containers}.")
+elif containers["running_count"] > expected_containers + 2:
+    add_problem(problems, "warning", f"Running containers: {containers['running_count']}, expected about {expected_containers}.")
+if containers["restarting"]:
+    add_problem(problems, "incident", "Restarting containers: " + ", ".join(containers["restarting"]))
+
+if any(item["severity"] == "incident" for item in problems):
+    status = "incident"
+elif problems:
+    status = "warning"
+else:
+    status = "ok"
+
+payload = {
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "timestamp_epoch": now,
+    "status": status,
+    "thresholds": {
+        "load_warning": load_warning,
+        "load_incident": load_incident,
+        "memory_warning_percent": memory_warning,
+        "memory_incident_percent": memory_incident,
+        "network_high_mbps_warning": round(network_high_bps * 8 / 1024 / 1024),
+        "disk_read_mbps_warning": round(disk_read_bps_warning / 1024 / 1024),
+        "disk_write_mbps_warning": round(disk_write_bps_warning / 1024 / 1024),
+        "health_summary_max_age_seconds": health_summary_max_age,
+        "expected_container_count": expected_containers,
+    },
+    "load": {"one": round(load_1m, 2), "five": round(load_5m, 2), "fifteen": round(load_15m, 2)},
+    "memory": {"used_percent": memory_percent},
+    "uptime_seconds": uptime_seconds,
+    "health_summary_age_seconds": health_summary_age,
+    "network": network,
+    "network_rates": net_rates,
+    "diskstats": diskstats,
+    "disk_rates": disk_rates,
+    "containers": containers,
+    "problems": problems,
+}
+
+status_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+state_path.write_text(json.dumps({
+    "timestamp_epoch": now,
+    "network": {"rx_bytes": network["rx_bytes"], "tx_bytes": network["tx_bytes"]},
+    "diskstats": diskstats,
+}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
+
+chmod 0644 "${tmp_file}"
+mv "${tmp_file}" "${status_file}"

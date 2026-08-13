@@ -1,0 +1,11 @@
+[Unit]
+Description=Run ALANET prod operations collector every five minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=alanet-prod-ops-collector.service
+
+[Install]
+WantedBy=timers.target

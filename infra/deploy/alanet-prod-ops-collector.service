@@ -1,0 +1,6 @@
+[Unit]
+Description=ALANET prod operations collector
+
+[Service]
+Type=oneshot
+ExecStart=/opt/alanet/infra/deploy/alanet-prod-ops-collector
