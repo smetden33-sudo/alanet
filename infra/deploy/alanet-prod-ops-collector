@@ -136,13 +136,27 @@ def read_diskstats() -> dict:
 
 def docker_containers() -> dict:
     names = [line.strip() for line in run(["docker", "ps", "--format", "{{.Names}}"], timeout=15).splitlines() if line.strip()]
+    production_names = [name for name in names if not name.startswith("alanet-staging-")]
+    staging_names = [name for name in names if name.startswith("alanet-staging-")]
     restarting = []
+    restarting_staging = []
     all_lines = run(["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}"], timeout=15).splitlines()
     for line in all_lines:
         parts = line.split("\t", 1)
         if len(parts) == 2 and "Restarting" in parts[1]:
-            restarting.append(parts[0])
-    return {"running_count": len(names), "running": sorted(names), "restarting": sorted(restarting)}
+            if parts[0].startswith("alanet-staging-"):
+                restarting_staging.append(parts[0])
+            else:
+                restarting.append(parts[0])
+    return {
+        "running_count": len(production_names),
+        "running_count_total": len(names),
+        "running_count_staging": len(staging_names),
+        "running": sorted(production_names),
+        "running_staging": sorted(staging_names),
+        "restarting": sorted(restarting),
+        "restarting_staging": sorted(restarting_staging),
+    }
 
 
 def add_problem(items: list[dict], severity: str, message: str) -> None:
@@ -204,6 +218,8 @@ elif containers["running_count"] > expected_containers + 2:
     add_problem(problems, "warning", f"Running containers: {containers['running_count']}, expected about {expected_containers}.")
 if containers["restarting"]:
     add_problem(problems, "incident", "Restarting containers: " + ", ".join(containers["restarting"]))
+if containers["restarting_staging"]:
+    add_problem(problems, "warning", "Restarting staging containers: " + ", ".join(containers["restarting_staging"]))
 
 if any(item["severity"] == "incident" for item in problems):
     status = "incident"
