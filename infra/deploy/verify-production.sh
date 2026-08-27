@@ -20,6 +20,7 @@ auth=(-H "Authorization: Bearer ${token}")
 monitor_state_dir="/var/lib/alanet-monitor"
 monitor_state_file="${monitor_state_dir}/health.state"
 monitor_summary_file="${monitor_state_dir}/health.summary"
+monitor_status_file="${monitor_state_dir}/health.status.json"
 node_registry_file="${ALANET_NODE_REGISTRY:-/opt/alanet/infra/node-registry.json}"
 extra_ping_targets_file="${ALANET_EXTRA_PING_TARGETS:-/etc/alanet/ping-targets}"
 load_state_file="${monitor_state_dir}/load.failures"
@@ -34,7 +35,7 @@ api_failure_threshold="${ALANET_API_FAILURE_THRESHOLD:-3}"
 ports_failure_threshold="${ALANET_PORTS_FAILURE_THRESHOLD:-3}"
 ping_failure_threshold="${ALANET_PING_FAILURE_THRESHOLD:-3}"
 disk_warning_threshold="${ALANET_DISK_WARNING_THRESHOLD:-85}"
-disk_incident_threshold="${ALANET_DISK_INCIDENT_THRESHOLD:-92}"
+disk_incident_threshold="${ALANET_DISK_INCIDENT_THRESHOLD:-95}"
 memory_warning_threshold="${ALANET_MEMORY_WARNING_THRESHOLD:-85}"
 memory_incident_threshold="${ALANET_MEMORY_INCIDENT_THRESHOLD:-95}"
 load_warning_threshold="${ALANET_LOAD_WARNING_THRESHOLD:-2.0}"
@@ -135,7 +136,7 @@ check_http_threshold() {
 }
 
 finish_healthcheck() {
-  local previous_state summary message
+  local previous_state summary message monitor_status_tmp
   previous_state="$(cat "${monitor_state_file}" 2>/dev/null || true)"
   {
     printf 'status=%s\n' "${status_name}"
@@ -146,7 +147,43 @@ finish_healthcheck() {
       printf 'problem=%s\n' "${item}"
     done
   } > "${monitor_summary_file}"
+  chmod 0644 "${monitor_summary_file}" || true
+  monitor_status_tmp="${monitor_status_file}.$$"
+  python3 - "$status_name" "$status_rank" "${warnings[@]}" "::PROBLEMS::" "${incidents[@]}" > "${monitor_status_tmp}" <<'PY'
+import json
+import sys
+from datetime import datetime, timezone
+
+args = sys.argv[1:]
+status = args[0] if len(args) > 0 else "unknown"
+try:
+    rank = int(args[1]) if len(args) > 1 else 0
+except ValueError:
+    rank = 0
+items = args[2:]
+if "::PROBLEMS::" in items:
+    separator = items.index("::PROBLEMS::")
+    warnings = items[:separator]
+    problems = items[separator + 1 :]
+else:
+    warnings = items
+    problems = []
+
+payload = {
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "status": status,
+    "rank": rank,
+    "warnings": warnings,
+    "problems": problems,
+    "warning_count": len(warnings),
+    "problem_count": len(problems),
+}
+print(json.dumps(payload, ensure_ascii=False))
+PY
+  mv -f "${monitor_status_tmp}" "${monitor_status_file}"
+  chmod 0644 "${monitor_status_file}" || true
   printf '%s\n' "${status_name}" > "${monitor_state_file}"
+  chmod 0644 "${monitor_state_file}" || true
 
   if (( status_rank >= 2 )); then
     if [[ "${previous_state}" != "${status_name}" ]]; then
@@ -324,9 +361,13 @@ check_ping_target() {
 
 if [[ -f "${node_registry_file}" ]]; then
   ping_count=0
-  while IFS=$'\t' read -r node_name ip; do
+  while IFS=$'\t' read -r node_name ip ping_policy ping_ignore_reason; do
+    if [[ "${ping_policy:-active}" == "ignored" ]]; then
+      printf 'node_ping_ignored=%s_%s reason=%s\n' "${node_name}" "${ip}" "${ping_ignore_reason:-ping_policy=ignored}"
+      continue
+    fi
     check_ping_target "${node_name}" "${ip}"
-  done < <(jq -r '.nodes[] | select(.status == "active") | [.node_name, .ip] | @tsv' "${node_registry_file}")
+  done < <(jq -r '.nodes[] | select(.status == "active") | [.node_name, .ip, (.ping_policy // "active"), (.ping_ignore_reason // "")] | @tsv' "${node_registry_file}")
 else
   printf 'node_ping_registry=missing\n'
   add_warning "Node registry is missing; registry node IP ping monitoring skipped."
@@ -445,10 +486,12 @@ for container in "${required_containers[@]}"; do
     container_failed=1
   fi
 done
-running_container_count="$(docker ps --format '{{.Names}}' | wc -l | tr -d ' ')"
+running_container_count="$(docker ps --format '{{.Names}}' | grep -v '^alanet-staging-' | wc -l | tr -d ' ')"
+staging_container_count="$(docker ps --format '{{.Names}}' | grep -c '^alanet-staging-' || true)"
 expected_container_count="${#required_containers[@]}"
 if (( container_failed == 0 )); then
   printf 'containers=%s/%s\n' "${running_container_count}" "${expected_container_count}"
+  printf 'staging_containers=%s\n' "${staging_container_count}"
 else
   add_incident "One or more required containers are not running. Impact: production service may be partially down."
 fi
