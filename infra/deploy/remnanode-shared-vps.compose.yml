@@ -2,7 +2,7 @@ services:
   remnanode-alanet:
     container_name: ${NODE_CONTAINER_NAME:-remnanode-alanet}
     hostname: ${NODE_HOSTNAME:-alanet-node}
-    image: remnawave/node:latest
+    image: ${NODE_IMAGE:-remnawave/node:3.2.0}
     network_mode: host
     restart: always
     security_opt:

@@ -47,6 +47,47 @@ fail() {
   exit 1
 }
 
+prune_keep_latest() {
+  local pattern="$1" keep="$2"
+  [[ "${keep}" =~ ^[0-9]+$ ]] || keep=2
+  if (( keep < 1 )); then
+    keep=1
+  fi
+  find "${backup_root}" -maxdepth 1 -type f -name "${pattern}" -printf '%T@ %p\n' \
+    | sort -nr \
+    | awk -v keep="${keep}" 'NR > keep { $1=""; sub(/^ /, ""); print }' \
+    | while IFS= read -r old_file; do
+        [[ -n "${old_file}" && "${old_file}" == "${backup_root}/"* ]] || continue
+        rm -f -- "${old_file}"
+      done
+}
+
+upload_rclone_gfs() {
+  local encrypted_file="$1"
+  local dest_root="${ALANET_BACKUP_RCLONE_DEST%/}"
+  local basename
+  basename="$(basename "${encrypted_file}")"
+  local uploaded_targets=()
+
+  local daily_target="${dest_root}/daily/${basename}"
+  rclone copyto "${encrypted_file}" "${daily_target}" || fail "rclone daily upload failed"
+  uploaded_targets+=("${daily_target}")
+
+  if [[ "$(date -u '+%u')" == "7" ]]; then
+    local weekly_target="${dest_root}/weekly/${basename}"
+    rclone copyto "${encrypted_file}" "${weekly_target}" || fail "rclone weekly upload failed"
+    uploaded_targets+=("${weekly_target}")
+  fi
+
+  if [[ "$(date -u '+%d')" == "01" ]]; then
+    local monthly_target="${dest_root}/monthly/${basename}"
+    rclone copyto "${encrypted_file}" "${monthly_target}" || fail "rclone monthly upload failed"
+    uploaded_targets+=("${monthly_target}")
+  fi
+
+  printf '%s' "$(IFS=','; echo "${uploaded_targets[*]}")"
+}
+
 docker exec remnawave-db sh -lc 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
   | gzip -9 > "${work_dir}/remnawave.sql.gz" || fail "remnawave pg_dump failed"
 docker exec alanet-billing-db-1 sh -lc 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' \
@@ -86,8 +127,7 @@ if [[ -n "${ALANET_BACKUP_ENCRYPTION_PASSPHRASE:-}" ]]; then
     chmod 600 "${external_target}" || true
     external_result="copied"
   elif [[ -n "${ALANET_BACKUP_RCLONE_DEST:-}" && "$(command -v rclone || true)" ]]; then
-    external_target="${ALANET_BACKUP_RCLONE_DEST%/}/$(basename "${encrypted_archive}")"
-    rclone copyto "${encrypted_archive}" "${external_target}" || fail "rclone upload failed"
+    external_target="$(upload_rclone_gfs "${encrypted_archive}")"
     external_result="uploaded"
   elif [[ -n "${ALANET_BACKUP_S3_URI:-}" && "$(command -v aws || true)" ]]; then
     external_target="${ALANET_BACKUP_S3_URI%/}/$(basename "${encrypted_archive}")"
@@ -102,6 +142,8 @@ fi
 
 find "${backup_root}" -maxdepth 1 -type f -name 'alanet-*.tar.gz' -mtime +"${ALANET_LOCAL_RETENTION_DAYS:-7}" -delete
 find "${backup_root}" -maxdepth 1 -type f -name 'alanet-*.tar.gz.enc' -mtime +"${ALANET_LOCAL_RETENTION_DAYS:-7}" -delete
+prune_keep_latest 'alanet-*.tar.gz' "${ALANET_LOCAL_RETENTION_KEEP:-2}"
+prune_keep_latest 'alanet-*.tar.gz.enc' "${ALANET_LOCAL_RETENTION_KEEP:-2}"
 
 if [[ -n "${ALANET_BACKUP_EXTERNAL_DIR:-}" ]]; then
   find "${ALANET_BACKUP_EXTERNAL_DIR}" -maxdepth 1 -type f -name 'alanet-*.tar.gz.enc' -mtime +"${ALANET_EXTERNAL_RETENTION_DAYS:-90}" -delete || true

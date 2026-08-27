@@ -52,6 +52,8 @@ services:
     build: ../backend
     restart: unless-stopped
     env_file: .env.staging
+    volumes:
+      - ../infra/node-registry.json:/opt/alanet/infra/node-registry.json:ro
     depends_on:
       billing-db:
         condition: service_healthy
@@ -72,6 +74,8 @@ services:
     build: ../backend
     restart: unless-stopped
     env_file: .env.staging
+    volumes:
+      - ../infra/node-registry.json:/opt/alanet/infra/node-registry.json:ro
     depends_on:
       billing-db:
         condition: service_healthy

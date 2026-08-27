@@ -33,6 +33,17 @@ rate_limits = {
 }
 
 
+@app.on_event("startup")
+async def startup() -> None:
+    try:
+        from .telegram import register_bot_commands
+
+        await register_bot_commands()
+        log.info("telegram_bot_commands_registered")
+    except Exception as exc:
+        log.warning("telegram_bot_commands_registration_failed", error=type(exc).__name__)
+
+
 @app.middleware("http")
 async def rate_limit(request: Request, call_next):
     limit = rate_limits.get(request.url.path)

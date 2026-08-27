@@ -127,16 +127,25 @@
 ## 9. Что осталось сделать следующим этапом
 
 - [ ] Расширить или разгрузить диск prod.
-- [ ] Добавить S3 lifecycle/retention на стороне Timeweb.
+- [x] Добавить S3 lifecycle/retention на стороне Timeweb.
 - [ ] Сделать staging-контур:
-  - [ ] отдельная база;
-  - [ ] test YooKassa shop;
-  - [ ] test Telegram bot;
-  - [ ] mock/test Remnawave;
-  - [ ] test node profile.
+  - [x] отдельная база;
+  - [x] test YooKassa shop;
+  - [x] test Telegram bot;
+  - [x] mock/test Remnawave;
+  - [x] test node profile через mock Remnawave;
+  - [x] staging smoke-check;
+  - [x] staging dry-run E2E без реальной оплаты;
+  - [x] staging paid checkout до статуса `PAYMENT_PENDING`;
+  - [x] staging successful payment E2E;
+  - [x] staging webhook `payment.succeeded`;
+  - [x] staging webhook replay/idempotency;
+  - [x] безопасный скрипт включения test YooKassa/staging Telegram bot;
+  - [x] отдельные домены `staging.alanet.ru`, `account-staging.alanet.ru`, `api-staging.alanet.ru`.
 - [ ] Довести Terraform/Ansible до команды “создать и зарегистрировать ноду”.
 - [ ] Сделать полноценный Incident mode dashboard.
+  - [x] Добавить machine-readable `/var/lib/alanet-monitor/health.status.json`.
+  - [x] Добавить Telegram `/incident` как компактную operational card.
 - [ ] Вынести secrets rotation в отдельный runbook.
 - [ ] Добавить anti-fraud ограничения для trial.
 - [ ] Добавить grace period перед отключением подписки.
-

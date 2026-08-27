@@ -49,6 +49,14 @@ api-staging.alanet.ru {
 	reverse_proxy alanet-staging-api:8000
 }
 
+monitor.alanet.ru, beszel.alanet.ru {
+	import security
+	import block-sensitive-paths
+	header X-Robots-Tag "noindex, nofollow, noarchive"
+	encode zstd gzip
+	reverse_proxy beszel:8090
+}
+
 panel.alanet.ru {
 	import security
 	import block-sensitive-paths

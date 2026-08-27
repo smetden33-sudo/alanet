@@ -4,6 +4,7 @@ Revision ID: 003
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 revision = "003"
 down_revision = "002"
@@ -12,18 +13,23 @@ depends_on = None
 
 
 def upgrade():
+    inspector = inspect(op.get_bind())
+    tables = set(inspector.get_table_names())
     for table in ("web_login_tokens", "web_sessions"):
-        op.create_table(
-            table,
-            sa.Column("id", sa.UUID(), primary_key=True, nullable=False),
-            sa.Column("customer_id", sa.UUID(), sa.ForeignKey("customers.id"), nullable=False),
-            sa.Column("token_hash", sa.String(length=64), nullable=False),
-            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-            sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True) if table == "web_login_tokens" else sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-            sa.UniqueConstraint("token_hash"),
-        )
-        op.create_index(f"ix_{table}_customer_id", table, ["customer_id"])
+        if table not in tables:
+            op.create_table(
+                table,
+                sa.Column("id", sa.UUID(), primary_key=True, nullable=False),
+                sa.Column("customer_id", sa.UUID(), sa.ForeignKey("customers.id"), nullable=False),
+                sa.Column("token_hash", sa.String(length=64), nullable=False),
+                sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+                sa.Column("consumed_at", sa.DateTime(timezone=True), nullable=True) if table == "web_login_tokens" else sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+                sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+                sa.UniqueConstraint("token_hash"),
+            )
+        indexes = {item["name"] for item in inspector.get_indexes(table)} if table in set(inspector.get_table_names()) else set()
+        if f"ix_{table}_customer_id" not in indexes:
+            op.create_index(f"ix_{table}_customer_id", table, ["customer_id"])
 
 
 def downgrade():

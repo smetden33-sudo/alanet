@@ -8,7 +8,16 @@ import httpx
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy import func, or_, select
 
 from .config import get_settings
@@ -36,6 +45,48 @@ def get_bot() -> Bot:
     if _bot is None:
         _bot = Bot(token)
     return _bot
+
+
+async def register_bot_commands() -> None:
+    bot = get_bot()
+    public_commands = [
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="test", description="Пробный доступ на 24 часа"),
+        BotCommand(command="cancel", description="Отменить действие"),
+    ]
+    admin_commands = [
+        *public_commands,
+        BotCommand(command="admin", description="Административное меню"),
+        BotCommand(command="stats", description="Статистика сервиса"),
+        BotCommand(command="status", description="Короткий статус проекта"),
+        BotCommand(command="incident", description="Карточка incident mode"),
+        BotCommand(command="health", description="Полная диагностика"),
+        BotCommand(command="ports", description="Проверка портов нод"),
+        BotCommand(command="backup", description="Статус backup"),
+        BotCommand(command="disk", description="Диск prod"),
+        BotCommand(command="cleanup", description="Статус автоочистки prod"),
+        BotCommand(command="deploy_status", description="Версия deploy"),
+        BotCommand(command="node_backup", description="Backup нод"),
+        BotCommand(command="failed", description="Что требует внимания"),
+        BotCommand(command="risk", description="Карта рисков"),
+        BotCommand(command="payments", description="Последние оплаты"),
+        BotCommand(command="finance", description="Сверка YooKassa"),
+        BotCommand(command="user", description="Карточка пользователя"),
+        BotCommand(command="grant", description="Выдать доступ"),
+        BotCommand(command="extend", description="Продлить доступ"),
+        BotCommand(command="revoke", description="Отозвать доступ"),
+        BotCommand(command="nodes", description="Список нод"),
+        BotCommand(command="node", description="Карточка ноды"),
+        BotCommand(command="orders", description="Последние заказы"),
+        BotCommand(command="retry_failed", description="Повторить failed provisioning"),
+        BotCommand(command="audit", description="Журнал действий"),
+        BotCommand(command="remnawave_sync", description="Drift Remnawave"),
+    ]
+
+    await bot.set_my_commands(public_commands, scope=BotCommandScopeDefault())
+    await bot.set_my_commands(public_commands, scope=BotCommandScopeAllPrivateChats())
+    for admin_id in admin_roles():
+        await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
 
 
 def main_menu() -> InlineKeyboardMarkup:
@@ -418,10 +469,17 @@ async def admin_menu(message: Message) -> None:
     role = admin_role_for_user(message.from_user.id if message.from_user else None) or "unknown"
     await message.answer(
         f"Административное меню ALANET\nВаша роль: {role}\n\n"
+        "/status — короткий светофор проекта\n"
+        "/incident — карточка incident mode одним экраном\n"
         "/health — полная диагностика\n"
         "/ports — проверка host-портов Remnawave\n"
         "/backup — статус последнего бэкапа\n"
         "/disk — место на prod и безопасная очистка\n"
+        "/cleanup — статус автоочистки prod\n"
+        "/deploy_status — версия backend/web и последний deploy\n"
+        "/node_backup — статус backup всех нод\n"
+        "/failed — всё, что требует внимания\n"
+        "/risk — короткая карта рисков\n"
         "/audit [дни] — журнал админских и системных действий\n"
         "/stats — статистика клиентов и заказов\n"
         "/user <telegram_id|@username|email> — карточка клиента\n"
@@ -459,6 +517,10 @@ async def send_admin_lines(message: Message, lines: list[str]) -> None:
 
 def ok_bad(value: bool) -> str:
     return "✅" if value else "❌"
+
+
+def warn_bad(value: bool) -> str:
+    return "✅" if value else "⚠️"
 
 
 def short_id(value: uuid.UUID | str | None) -> str:
@@ -906,6 +968,320 @@ def backup_status_lines() -> list[str]:
     return lines
 
 
+def _status_badge(status_name: str | None) -> str:
+    normalized = (status_name or "unknown").lower()
+    if normalized in {"ok", "up", "active", "success"}:
+        return "✅"
+    if normalized in {"warning", "partial", "degraded"}:
+        return "⚠️"
+    return "❌"
+
+
+async def project_status_lines() -> list[str]:
+    lines = ["ALANET status"]
+    problems: list[str] = []
+
+    async with SessionLocal() as session:
+        try:
+            customers = await session.scalar(select(func.count()).select_from(Customer))
+            active_subs = await session.scalar(select(func.count()).select_from(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE))
+            failed_provisioning = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.PROVISIONING_FAILED))
+            lines.append(f"✅ DB: ok · клиентов {customers} · активных подписок {active_subs}")
+            if failed_provisioning:
+                problems.append(f"failed provisioning: {failed_provisioning}")
+        except Exception as exc:
+            log.exception("admin_status_db_failed")
+            lines.append(f"❌ DB: {type(exc).__name__}")
+            problems.append("DB unavailable")
+
+    http_checks = [
+        ("site", "https://alanet.ru/", "200"),
+        ("account", "https://account.alanet.ru/", "200"),
+        ("api", "https://api.alanet.ru/health", "200"),
+        ("panel", "https://panel.alanet.ru/", "200"),
+    ]
+    http_ok = 0
+    for name, url, expected in http_checks:
+        status = await fetch_status(url)
+        if status == expected:
+            http_ok += 1
+        else:
+            problems.append(f"{name} HTTP {status}")
+    lines.append(f"{ok_bad(http_ok == len(http_checks))} HTTP: {http_ok}/{len(http_checks)}")
+
+    try:
+        client = RemnawaveClient(settings)
+        nodes = await client.list_nodes()
+        hosts = await client.list_hosts()
+        connected = sum(1 for node in nodes if node.get("isConnected"))
+        enabled_hosts = [host for host in hosts if not host.get("isDisabled", False)]
+        rem_ok = connected == len(nodes) and connected > 0 and len(enabled_hosts) > 0
+        lines.append(f"{ok_bad(rem_ok)} Remnawave: nodes {connected}/{len(nodes)}, hosts {len(enabled_hosts)}")
+        if not rem_ok:
+            problems.append("Remnawave nodes/hosts degraded")
+    except Exception as exc:
+        log.exception("admin_status_remnawave_failed")
+        lines.append(f"❌ Remnawave: {type(exc).__name__}")
+        problems.append("Remnawave unavailable")
+
+    health_status = _read_monitor_status("health.status.json")
+    if health_status:
+        fresh, age = _format_status_age(health_status.get("timestamp"))
+        health_state = str(health_status.get("status") or "unknown")
+        warning_count = health_status.get("warning_count", 0)
+        problem_count = health_status.get("problem_count", 0)
+        lines.append(
+            f"{_status_badge(health_state) if fresh else '⚠️'} Health-check: {health_state}, "
+            f"warnings {warning_count}, problems {problem_count}, age {age}"
+        )
+        for item in (health_status.get("problems") or [])[:3]:
+            problems.append(str(item))
+        if not fresh:
+            problems.append("health status stale")
+        elif health_state not in {"ok", "warning"}:
+            problems.append(f"health-check {health_state}")
+    else:
+        health_state = "unknown"
+        try:
+            health_state = (MONITOR_DIR / "health.state").read_text(encoding="utf-8").strip()
+        except Exception:
+            problems.append("health state missing")
+        lines.append(f"{_status_badge(health_state)} Health-check: {health_state}")
+
+    prod_ops = _read_monitor_status("prod-ops.status.json")
+    if prod_ops:
+        fresh, age = _format_status_age(prod_ops.get("timestamp"))
+        prod_status = str(prod_ops.get("status") or "unknown")
+        load = prod_ops.get("load") or {}
+        memory = prod_ops.get("memory") or {}
+        lines.append(
+            f"{_status_badge(prod_status) if fresh else '⚠️'} Prod ops: {prod_status}, "
+            f"load {load.get('one', '?')}, RAM {memory.get('used_percent', '?')}%, age {age}"
+        )
+        if prod_status not in {"ok", "warning"} or not fresh:
+            problems.append("prod ops degraded")
+    else:
+        lines.append("⚠️ Prod ops: no status")
+        problems.append("prod ops missing")
+
+    backup_status = _read_monitor_status("backup.status.json")
+    if backup_status:
+        fresh, age = _format_status_age(backup_status.get("timestamp"))
+        status_name = str(backup_status.get("status") or "unknown")
+        external = backup_status.get("external_result") or backup_status.get("external") or ("uploaded" if backup_status.get("external_archive") else "unknown")
+        lines.append(f"{_status_badge(status_name) if fresh else '⚠️'} Backup: {status_name}, external={external}, age {age}")
+        if status_name != "ok" or not fresh or external not in {"uploaded", "copied"}:
+            problems.append("backup requires attention")
+    else:
+        lines.append("⚠️ Backup: no status")
+        problems.append("backup status missing")
+
+    restore_status = _read_monitor_status("restore-test.status.json")
+    if restore_status:
+        fresh, age = _format_status_age(restore_status.get("timestamp"))
+        status_name = str(restore_status.get("status") or "unknown")
+        lines.append(f"{_status_badge(status_name) if fresh else '⚠️'} Restore-test: {status_name}, age {age}")
+    else:
+        lines.append("⚠️ Restore-test: no status")
+
+    e2e_status = _read_monitor_status("e2e.status.json")
+    if e2e_status:
+        fresh, age = _format_status_age(e2e_status.get("timestamp"))
+        status_name = str(e2e_status.get("status") or "unknown")
+        lines.append(f"{_status_badge(status_name) if fresh else '⚠️'} E2E: {status_name}, {e2e_status.get('ok_count', '?')}/{e2e_status.get('total_count', '?')}, age {age}")
+        if status_name != "ok" or not fresh:
+            problems.append("E2E synthetic check requires attention")
+    else:
+        lines.append("⚠️ E2E: no status")
+
+    if problems:
+        lines.append("Проблемы:")
+        lines.extend(f"- {item}" for item in problems[:8])
+    else:
+        lines.append("Итог: ✅ коммерческий контур в норме")
+    return lines
+
+
+async def incident_card_lines() -> list[str]:
+    lines = ["🚦 ALANET incident card"]
+    problems: list[str] = []
+
+    health_status = _read_monitor_status("health.status.json")
+    if health_status:
+        fresh, age = _format_status_age(health_status.get("timestamp"))
+        health_state = str(health_status.get("status") or "unknown")
+        warnings = health_status.get("warnings") or []
+        health_problems = health_status.get("problems") or []
+        lines.append(
+            f"{_status_badge(health_state) if fresh else '⚠️'} Overall: {health_state}, "
+            f"warn {len(warnings)}, problem {len(health_problems)}, age {age}"
+        )
+        if not fresh:
+            problems.append("health snapshot stale")
+        problems.extend(str(item) for item in health_problems[:4])
+        if not health_problems:
+            problems.extend(str(item) for item in warnings[:2])
+    else:
+        lines.append("❌ Overall: no health.status.json")
+        problems.append("health.status.json missing")
+
+    async with SessionLocal() as session:
+        try:
+            customers = await session.scalar(select(func.count()).select_from(Customer)) or 0
+            active_subs = await session.scalar(select(func.count()).select_from(Subscription).where(Subscription.status == SubscriptionStatus.ACTIVE)) or 0
+            failed_provisioning = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.PROVISIONING_FAILED)) or 0
+            pending_orders = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.PROVISIONING)) or 0
+            lines.append(f"✅ DB: ok · clients {customers} · active {active_subs} · failed/pending {failed_provisioning}/{pending_orders}")
+            if failed_provisioning:
+                problems.append(f"failed provisioning: {failed_provisioning}")
+        except Exception as exc:
+            log.exception("admin_incident_db_failed")
+            lines.append(f"❌ DB: {type(exc).__name__}")
+            problems.append("DB unavailable")
+
+    http_checks = [
+        ("site", "https://alanet.ru/", "200"),
+        ("account", "https://account.alanet.ru/", "200"),
+        ("api", "https://api.alanet.ru/health", "200"),
+        ("panel", "https://panel.alanet.ru/", "200"),
+    ]
+    http_results = await asyncio.gather(*(fetch_status(url) for _name, url, _expected in http_checks), return_exceptions=True)
+    http_ok = 0
+    http_bad: list[str] = []
+    for (name, _url, expected), result in zip(http_checks, http_results, strict=False):
+        status = type(result).__name__ if isinstance(result, Exception) else str(result)
+        if status == expected:
+            http_ok += 1
+        else:
+            http_bad.append(f"{name}:{status}")
+    lines.append(f"{ok_bad(http_ok == len(http_checks))} Web/API: {http_ok}/{len(http_checks)}" + (f" · {', '.join(http_bad[:3])}" if http_bad else ""))
+    problems.extend(f"HTTP {item}" for item in http_bad[:3])
+
+    try:
+        client = RemnawaveClient(settings)
+        nodes, hosts = await asyncio.gather(client.list_nodes(), client.list_hosts())
+        connected = sum(1 for node in nodes if node.get("isConnected"))
+        enabled_hosts = [host for host in hosts if not host.get("isDisabled", False)]
+        port_tasks = []
+        host_checks = []
+        for host in enabled_hosts:
+            address = str(host.get("address") or "")
+            try:
+                port = int(host.get("port"))
+            except (TypeError, ValueError):
+                host_checks.append((host, False, "bad_port"))
+                continue
+            port_tasks.append((host, tcp_port_open(address, port, timeout=3.0)))
+        port_results = await asyncio.gather(*(task for _host, task in port_tasks), return_exceptions=True)
+        for (host, _task), result in zip(port_tasks, port_results, strict=False):
+            if isinstance(result, Exception):
+                host_checks.append((host, False, type(result).__name__))
+            else:
+                ok, error = result
+                host_checks.append((host, ok, error))
+        host_ok = sum(1 for _host, ok, _error in host_checks if ok)
+        bad_hosts = [
+            f"{host.get('remark') or host.get('name') or host.get('address')}:{host.get('port')} {error}"
+            for host, ok, error in host_checks
+            if not ok
+        ]
+        rem_ok = connected == len(nodes) and connected > 0 and host_ok == len(host_checks)
+        lines.append(f"{ok_bad(rem_ok)} Remnawave: nodes {connected}/{len(nodes)} · ports {host_ok}/{len(host_checks)}")
+        problems.extend(f"host port {item}" for item in bad_hosts[:4])
+        if connected != len(nodes):
+            disconnected = [str(node.get("name") or node.get("address")) for node in nodes if not node.get("isConnected")]
+            problems.extend(f"node disconnected: {item}" for item in disconnected[:4])
+    except Exception as exc:
+        log.exception("admin_incident_remnawave_failed")
+        lines.append(f"❌ Remnawave/ports: {type(exc).__name__}")
+        problems.append("Remnawave/ports unavailable")
+
+    prod_ops = _read_monitor_status("prod-ops.status.json")
+    disk = _read_monitor_status("disk.status.json")
+    if prod_ops:
+        fresh, age = _format_status_age(prod_ops.get("timestamp"))
+        prod_status = str(prod_ops.get("status") or "unknown")
+        load = prod_ops.get("load") or {}
+        memory = prod_ops.get("memory") or {}
+        containers = prod_ops.get("containers") or {}
+        lines.append(
+            f"{_status_badge(prod_status) if fresh else '⚠️'} Prod: {prod_status} · "
+            f"load {load.get('one', '?')} · RAM {memory.get('used_percent', '?')}% · "
+            f"containers {containers.get('running_count', '?')} · age {age}"
+        )
+        if not fresh or prod_status not in {"ok", "warning"}:
+            problems.append("prod ops degraded")
+    else:
+        lines.append("⚠️ Prod: no prod-ops status")
+        problems.append("prod-ops status missing")
+
+    if disk:
+        fresh, age = _format_status_age(disk.get("timestamp"))
+        disk_status = str(disk.get("status") or "unknown")
+        root = disk.get("root") or {}
+        lines.append(
+            f"{_status_badge(disk_status) if fresh else '⚠️'} Disk: {disk_status} · "
+            f"/ {root.get('used_percent', '?')}% · free {_format_bytes(root.get('free_bytes'))} · age {age}"
+        )
+        if not fresh or disk_status not in {"ok", "warning"}:
+            problems.append("disk requires attention")
+    else:
+        lines.append("⚠️ Disk: no status")
+        problems.append("disk status missing")
+
+    backup = _read_monitor_status("backup.status.json")
+    restore = _read_monitor_status("restore-test.status.json")
+    node_backup = _read_monitor_status("node-backup.status.json")
+    backup_parts: list[str] = []
+    backup_ok = True
+    for label, status in [("backup", backup), ("restore", restore), ("nodes", node_backup)]:
+        if not status:
+            backup_parts.append(f"{label}:missing")
+            problems.append(f"{label} status missing")
+            backup_ok = False
+            continue
+        fresh, age = _format_status_age(status.get("timestamp"))
+        status_name = str(status.get("status") or "unknown")
+        backup_parts.append(f"{label}:{status_name}/{age}")
+        if not fresh or status_name not in {"ok", "warning"}:
+            problems.append(f"{label} {status_name}")
+            backup_ok = False
+    lines.append(f"{ok_bad(backup_ok)} Backup: " + " · ".join(backup_parts))
+
+    e2e = _read_monitor_status("e2e.status.json")
+    if e2e:
+        fresh, age = _format_status_age(e2e.get("timestamp"))
+        e2e_status = str(e2e.get("status") or "unknown")
+        lines.append(f"{_status_badge(e2e_status) if fresh else '⚠️'} E2E: {e2e_status} · {e2e.get('ok_count', '?')}/{e2e.get('total_count', '?')} · age {age}")
+        if not fresh or e2e_status not in {"ok", "warning"}:
+            problems.append("E2E synthetic check requires attention")
+    else:
+        lines.append("⚠️ E2E: no status")
+
+    unique_problems = list(dict.fromkeys(item for item in problems if item))
+    if unique_problems:
+        lines.append("Attention:")
+        lines.extend(f"- {item}" for item in unique_problems[:8])
+    else:
+        lines.append("Итог: ✅ incident не обнаружен")
+    lines.append("Детали: /health /ports /backup /disk")
+    return lines
+
+
+@router.message(Command("status"))
+async def admin_status(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await send_admin_lines(message, await project_status_lines())
+
+
+@router.message(Command("incident"))
+async def admin_incident(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await send_admin_lines(message, await incident_card_lines())
+
+
 def latest_backup_status_line() -> str:
     return "\n".join(backup_status_lines())
 
@@ -1002,6 +1378,186 @@ async def admin_disk(message: Message) -> None:
     if not await require_admin(message):
         return
     await send_admin_lines(message, disk_status_lines())
+
+
+def cleanup_status_lines() -> list[str]:
+    status = _read_monitor_status("cleanup.status.json")
+    if not status:
+        return [
+            "Cleanup prod: статус не найден.",
+            "Ожидается файл /var/lib/alanet-monitor/cleanup.status.json.",
+            "Host-команда: sudo systemctl start alanet-safe-cleanup.service",
+        ]
+    fresh, age = _format_status_age(status.get("timestamp"))
+    status_name = str(status.get("status") or "unknown")
+    lines = [
+        f"{_status_badge(status_name) if fresh else '⚠️'} Cleanup prod: {status_name}, age {age}",
+        f"Trigger: / >= {status.get('trigger_percent', '?')}%",
+        f"Disk: {status.get('disk_before_percent', '?')}% → {status.get('disk_after_percent', '?')}%",
+    ]
+    actions = status.get("actions") or []
+    if actions:
+        lines.append("Actions:")
+        lines.extend(f"- {item}" for item in actions[:8])
+    errors = status.get("errors") or []
+    if errors:
+        lines.append("Errors:")
+        lines.extend(f"- {item}" for item in errors[:5])
+    lines.append("Note: Telegram bot intentionally has read-only access to host cleanup status.")
+    return lines
+
+
+@router.message(Command("cleanup"))
+async def admin_cleanup(message: Message) -> None:
+    if not await require_admin(message, "ops"):
+        return
+    await send_admin_lines(message, cleanup_status_lines())
+
+
+def deploy_status_lines() -> list[str]:
+    status = _read_monitor_status("deploy.status.json")
+    lines = ["Deploy status"]
+    if status:
+        fresh, age = _format_status_age(status.get("timestamp"))
+        status_name = str(status.get("status") or "unknown")
+        lines.extend([
+            f"{_status_badge(status_name) if fresh else '⚠️'} Last deploy: {status_name}, age {age}",
+            f"Mode: {status.get('mode', 'unknown')}",
+            f"Backend image: {status.get('backend_image') or 'unknown'}",
+            f"Backup dir: {status.get('backup_dir') or 'unknown'}",
+        ])
+    else:
+        lines.extend([
+            "⚠️ Last deploy status: no status file",
+            "Expected: /var/lib/alanet-monitor/deploy.status.json",
+        ])
+    lines.extend(prod_ops_status_lines()[:4])
+    return lines
+
+
+@router.message(Command("deploy_status"))
+async def admin_deploy_status(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await send_admin_lines(message, deploy_status_lines())
+
+
+def node_backup_status_lines() -> list[str]:
+    status = _read_monitor_status("node-backup.status.json")
+    if not status:
+        return [
+            "Node backup: статус не найден.",
+            "Ожидается файл /var/lib/alanet-monitor/node-backup.status.json.",
+        ]
+    fresh, age = _format_status_age(status.get("timestamp"))
+    status_name = str(status.get("status") or "unknown")
+    failed_nodes = status.get("failed_nodes") or []
+    ignored_nodes = status.get("ignored_nodes") or []
+    lines = [
+        f"{_status_badge(status_name) if fresh else '⚠️'} Node backup: {status_name}, age {age}",
+        f"OK: {status.get('ok_count', '?')}, failed: {status.get('fail_count', '?')}, ignored: {status.get('ignored_count', len(ignored_nodes))}",
+        f"S3: {status.get('s3_target') or 'unknown'}",
+        f"Archive: {status.get('encrypted_archive') or status.get('archive') or 'unknown'}",
+    ]
+    if ignored_nodes:
+        lines.append("Ignored / controlled risk:")
+        lines.extend(f"- {item}" for item in ignored_nodes[:12])
+        lines.append("Policy: эти shared-ноды не трогаем без отдельной команды.")
+    if failed_nodes:
+        lines.append("Failed nodes:")
+        lines.extend(f"- {item}" for item in failed_nodes[:12])
+        lines.append("Next: проверить SSH deploy key на этих нодах и повторить backup.")
+    return lines
+
+
+@router.message(Command("node_backup"))
+async def admin_node_backup(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await send_admin_lines(message, node_backup_status_lines())
+
+
+async def failed_status_lines() -> list[str]:
+    lines = ["ALANET failed / attention"]
+    async with SessionLocal() as session:
+        failed_provisioning = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.PROVISIONING_FAILED)) or 0
+        pending_orders = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.PROVISIONING)) or 0
+        failed_actions = await session.scalar(select(func.count()).select_from(AdminAction).where(AdminAction.status == "FAILED")) or 0
+        lines.append(f"Provisioning failed: {failed_provisioning}")
+        lines.append(f"Provisioning pending: {pending_orders}")
+        lines.append(f"Admin actions failed: {failed_actions}")
+    health_state = "unknown"
+    try:
+        health_state = (MONITOR_DIR / "health.state").read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+    lines.append(f"Health state: {health_state}")
+    for name, label in [
+        ("backup.status.json", "Backup"),
+        ("node-backup.status.json", "Node backup"),
+        ("cleanup.status.json", "Cleanup"),
+        ("e2e.status.json", "E2E"),
+        ("restore-test.status.json", "Restore-test"),
+    ]:
+        status = _read_monitor_status(name)
+        if not status:
+            lines.append(f"⚠️ {label}: no status")
+            continue
+        fresh, age = _format_status_age(status.get("timestamp"))
+        status_name = str(status.get("status") or "unknown")
+        if status_name != "ok" or not fresh:
+            lines.append(f"{_status_badge(status_name)} {label}: {status_name}, age {age}")
+        if name == "node-backup.status.json" and status.get("ignored_count"):
+            lines.append(f"ℹ️ Node backup controlled risk: ignored {status.get('ignored_count')} shared nodes")
+    return lines
+
+
+@router.message(Command("failed"))
+async def admin_failed(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await send_admin_lines(message, await failed_status_lines())
+
+
+async def risk_status_lines() -> list[str]:
+    lines = ["ALANET risk map"]
+    disk = _read_monitor_status("disk.status.json")
+    if disk:
+        root = disk.get("root") or {}
+        thresholds = disk.get("thresholds") or {}
+        used = root.get("used_percent")
+        incident = thresholds.get("incident_percent")
+        lines.append(f"{'⚠️' if used and used >= 85 else '✅'} Prod disk: {used}% used, incident {incident}%")
+    node_backup = _read_monitor_status("node-backup.status.json")
+    if node_backup:
+        fail_count = int(node_backup.get("fail_count") or 0)
+        ignored_count = int(node_backup.get("ignored_count") or 0)
+        lines.append(f"{'⚠️' if fail_count else '✅'} Node backup: failed {fail_count}, ignored controlled {ignored_count}")
+    cleanup = _read_monitor_status("cleanup.status.json")
+    if cleanup:
+        lines.append(f"{_status_badge(str(cleanup.get('status') or 'unknown'))} Cleanup: {cleanup.get('status')}, disk {cleanup.get('disk_after_percent', '?')}%")
+    e2e = _read_monitor_status("e2e.status.json")
+    if e2e:
+        lines.append(f"{_status_badge(str(e2e.get('status') or 'unknown'))} E2E: {e2e.get('status')}, checks {e2e.get('ok_count', '?')}/{e2e.get('total_count', '?')}")
+    async with SessionLocal() as session:
+        failed_provisioning = await session.scalar(select(func.count()).select_from(Order).where(Order.status == OrderStatus.PROVISIONING_FAILED)) or 0
+        expiring = await session.scalar(
+            select(func.count()).select_from(Subscription).where(
+                Subscription.status == SubscriptionStatus.ACTIVE,
+                Subscription.expires_at <= datetime.now(UTC) + timedelta(days=1),
+            )
+        ) or 0
+    lines.append(f"{'⚠️' if failed_provisioning else '✅'} Failed provisioning: {failed_provisioning}")
+    lines.append(f"{'⚠️' if expiring else '✅'} Expiring in 24h: {expiring}")
+    lines.append("Top next actions: node backup → off-host Docker build → staging payments.")
+    return lines
+
+
+@router.message(Command("risk"))
+async def admin_risk(message: Message) -> None:
+    if not await require_admin(message):
+        return
+    await send_admin_lines(message, await risk_status_lines())
 
 
 @router.message(Command("audit"))

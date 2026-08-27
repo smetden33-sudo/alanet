@@ -21,18 +21,22 @@ cleanup() {
 trap cleanup EXIT
 
 json_status() {
-  local status="$1" message="$2" archive_path="${3:-}" encrypted_path="${4:-}" s3_target="${5:-}" ok_count="${6:-0}" fail_count="${7:-0}" failed_nodes_json="${8:-[]}"
-  python3 - "$status" "$message" "$archive_path" "$encrypted_path" "$s3_target" "$ok_count" "$fail_count" "$failed_nodes_json" > "${status_file}" <<'PY'
+  local status="$1" message="$2" archive_path="${3:-}" encrypted_path="${4:-}" s3_target="${5:-}" ok_count="${6:-0}" fail_count="${7:-0}" failed_nodes_json="${8:-[]}" ignored_nodes_json="${9:-[]}"
+  python3 - "$status" "$message" "$archive_path" "$encrypted_path" "$s3_target" "$ok_count" "$fail_count" "$failed_nodes_json" "$ignored_nodes_json" > "${status_file}" <<'PY'
 import json
 import os
 import sys
 from datetime import datetime, timezone
 
-status, message, archive_path, encrypted_path, s3_target, ok_count, fail_count, failed_nodes_json = sys.argv[1:9]
+status, message, archive_path, encrypted_path, s3_target, ok_count, fail_count, failed_nodes_json, ignored_nodes_json = sys.argv[1:10]
 try:
     failed_nodes = json.loads(failed_nodes_json)
 except Exception:
     failed_nodes = []
+try:
+    ignored_nodes = json.loads(ignored_nodes_json)
+except Exception:
+    ignored_nodes = []
 payload = {
     "timestamp": datetime.now(timezone.utc).isoformat(),
     "status": status,
@@ -44,6 +48,8 @@ payload = {
     "ok_count": int(ok_count),
     "fail_count": int(fail_count),
     "failed_nodes": failed_nodes,
+    "ignored_count": len(ignored_nodes),
+    "ignored_nodes": ignored_nodes,
     "key": "alanet_deploy_ed25519",
 }
 print(json.dumps(payload, ensure_ascii=False))
@@ -53,9 +59,50 @@ PY
 
 fail() {
   local message="$1"
-  json_status "failed" "${message}" "${archive}" "" "" 0 0 "[]"
+  json_status "failed" "${message}" "${archive}" "" "" 0 0 "[]" "[]"
   echo "node_backup_failed=${message}"
   exit 1
+}
+
+prune_keep_latest() {
+  local pattern="$1" keep="$2"
+  [[ "${keep}" =~ ^[0-9]+$ ]] || keep=2
+  if (( keep < 1 )); then
+    keep=1
+  fi
+  find "${backup_root}" -maxdepth 1 -type f -name "${pattern}" -printf '%T@ %p\n' \
+    | sort -nr \
+    | awk -v keep="${keep}" 'NR > keep { $1=""; sub(/^ /, ""); print }' \
+    | while IFS= read -r old_file; do
+        [[ -n "${old_file}" && "${old_file}" == "${backup_root}/"* ]] || continue
+        rm -f -- "${old_file}"
+      done
+}
+
+upload_rclone_gfs() {
+  local encrypted_file="$1"
+  local dest_root="${ALANET_BACKUP_RCLONE_DEST%/}/node-backups"
+  local basename
+  basename="$(basename "${encrypted_file}")"
+  local uploaded_targets=()
+
+  local daily_target="${dest_root}/daily/${basename}"
+  rclone copyto "${encrypted_file}" "${daily_target}" || fail "node backup daily rclone upload failed"
+  uploaded_targets+=("${daily_target}")
+
+  if [[ "$(date -u '+%u')" == "7" ]]; then
+    local weekly_target="${dest_root}/weekly/${basename}"
+    rclone copyto "${encrypted_file}" "${weekly_target}" || fail "node backup weekly rclone upload failed"
+    uploaded_targets+=("${weekly_target}")
+  fi
+
+  if [[ "$(date -u '+%d')" == "01" ]]; then
+    local monthly_target="${dest_root}/monthly/${basename}"
+    rclone copyto "${encrypted_file}" "${monthly_target}" || fail "node backup monthly rclone upload failed"
+    uploaded_targets+=("${monthly_target}")
+  fi
+
+  printf '%s' "$(IFS=','; echo "${uploaded_targets[*]}")"
 }
 
 [[ -s "${ssh_key}" ]] || fail "SSH key is missing: ${ssh_key}"
@@ -126,6 +173,8 @@ if node_registry.exists():
             "ip": node.get("ip"),
             "port": int(node.get("control_port") or 22),
             "user": node.get("ssh_user") or "root",
+            "backup_policy": node.get("backup_policy") or "active",
+            "backup_ignore_reason": node.get("backup_ignore_reason") or "",
         })
 if head_registry.exists():
     data = json.loads(head_registry.read_text(encoding="utf-8"))
@@ -138,6 +187,8 @@ if head_registry.exists():
             "ip": head.get("ip"),
             "port": int(head.get("ssh_port") or head.get("control_port") or 22),
             "user": head.get("ssh_user") or "root",
+            "backup_policy": head.get("backup_policy") or "active",
+            "backup_ignore_reason": head.get("backup_ignore_reason") or "",
         })
 seen = set()
 for target in targets:
@@ -147,7 +198,7 @@ for target in targets:
     if key in seen:
         continue
     seen.add(key)
-    print("\t".join(str(target[item]) for item in ["kind", "name", "ip", "port", "user"]))
+    print("\t".join(str(target[item]) for item in ["kind", "name", "ip", "port", "user", "backup_policy", "backup_ignore_reason"]))
 PY
 
 cp -f "${node_registry}" "${workdir}/node-registry.json" 2>/dev/null || true
@@ -156,9 +207,15 @@ cp -f "${head_registry}" "${workdir}/head-registry.json" 2>/dev/null || true
 ok_count=0
 fail_count=0
 failed_nodes=()
+ignored_nodes=()
 mkdir -p "${workdir}/targets"
 
-while IFS=$'\t' read -r kind name ip port user; do
+while IFS=$'\t' read -r kind name ip port user backup_policy backup_ignore_reason; do
+  if [[ "${backup_policy}" == "ignored" ]]; then
+    ignored_nodes+=("${name}")
+    printf 'IGNORE %s %s\n' "${name}" "${backup_ignore_reason:-backup_policy=ignored}"
+    continue
+  fi
   safe_name="$(printf '%s-%s-%s' "${kind}" "${name}" "${ip}" | tr -c 'A-Za-z0-9_.-' '_')"
   target_archive="${workdir}/targets/${safe_name}.tar.gz"
   remote_command="sh -s"
@@ -204,8 +261,11 @@ failed_nodes = sys.argv[4:]
 targets = []
 if targets_path.exists():
     for line in targets_path.read_text(encoding="utf-8").splitlines():
-        kind, name, ip, port, user = line.split("\t")
-        targets.append({"kind": kind, "name": name, "ip": ip, "port": int(port), "user": user})
+        parts = line.split("\t")
+        kind, name, ip, port, user = parts[:5]
+        backup_policy = parts[5] if len(parts) > 5 else "active"
+        backup_ignore_reason = parts[6] if len(parts) > 6 else ""
+        targets.append({"kind": kind, "name": name, "ip": ip, "port": int(port), "user": user, "backup_policy": backup_policy, "backup_ignore_reason": backup_ignore_reason})
 print(json.dumps({
     "created_at": datetime.now(timezone.utc).isoformat(),
     "key": "alanet_deploy_ed25519",
@@ -228,8 +288,7 @@ if [[ -n "${ALANET_BACKUP_ENCRYPTION_PASSPHRASE:-}" ]]; then
   chmod 600 "${encrypted_archive}"
 
   if [[ -n "${ALANET_BACKUP_RCLONE_DEST:-}" && "$(command -v rclone || true)" ]]; then
-    external_target="${ALANET_BACKUP_RCLONE_DEST%/}/node-backups/$(basename "${encrypted_archive}")"
-    rclone copyto "${encrypted_archive}" "${external_target}" || fail "node backup rclone upload failed"
+    external_target="$(upload_rclone_gfs "${encrypted_archive}")"
   else
     fail "ALANET_BACKUP_RCLONE_DEST is not configured"
   fi
@@ -239,8 +298,16 @@ fi
 
 find "${backup_root}" -maxdepth 1 -type f -name 'alanet-node-backups-*.tar.gz' -mtime +"${ALANET_LOCAL_RETENTION_DAYS:-7}" -delete
 find "${backup_root}" -maxdepth 1 -type f -name 'alanet-node-backups-*.tar.gz.enc' -mtime +"${ALANET_LOCAL_RETENTION_DAYS:-7}" -delete
+prune_keep_latest 'alanet-node-backups-*.tar.gz' "${ALANET_LOCAL_RETENTION_KEEP:-2}"
+prune_keep_latest 'alanet-node-backups-*.tar.gz.enc' "${ALANET_LOCAL_RETENTION_KEEP:-2}"
 
 failed_nodes_json="$(python3 - "${failed_nodes[@]}" <<'PY'
+import json
+import sys
+print(json.dumps(sys.argv[1:], ensure_ascii=False))
+PY
+)"
+ignored_nodes_json="$(python3 - "${ignored_nodes[@]}" <<'PY'
 import json
 import sys
 print(json.dumps(sys.argv[1:], ensure_ascii=False))
@@ -251,6 +318,9 @@ message="node/head backup uploaded"
 if [[ "${fail_count}" -gt 0 ]]; then
   status="partial"
   message="node/head backup uploaded with failed targets"
+elif [[ "${#ignored_nodes[@]}" -gt 0 ]]; then
+  status="ok"
+  message="node/head backup uploaded; some targets intentionally ignored"
 fi
-json_status "${status}" "${message}" "${archive}" "${encrypted_archive}" "${external_target}" "${ok_count}" "${fail_count}" "${failed_nodes_json}"
-printf 'node_backup_%s ok=%s fail=%s target=%s\n' "${status}" "${ok_count}" "${fail_count}" "${external_target}"
+json_status "${status}" "${message}" "${archive}" "${encrypted_archive}" "${external_target}" "${ok_count}" "${fail_count}" "${failed_nodes_json}" "${ignored_nodes_json}"
+printf 'node_backup_%s ok=%s fail=%s ignored=%s target=%s\n' "${status}" "${ok_count}" "${fail_count}" "${#ignored_nodes[@]}" "${external_target}"

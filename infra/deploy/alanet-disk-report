@@ -5,7 +5,7 @@ monitor_dir="${ALANET_MONITOR_DIR:-/var/lib/alanet-monitor}"
 status_file="${monitor_dir}/disk.status.json"
 tmp_file="${status_file}.tmp"
 warning_threshold="${ALANET_DISK_WARNING_THRESHOLD:-85}"
-incident_threshold="${ALANET_DISK_INCIDENT_THRESHOLD:-92}"
+incident_threshold="${ALANET_DISK_INCIDENT_THRESHOLD:-95}"
 
 mkdir -p "${monitor_dir}"
 
@@ -99,10 +99,11 @@ else:
 docker = docker_system_df()
 safe_cleanup = [
     "docker image prune -f",
-    "docker system prune -af --volumes",
+    "docker builder prune -af",
+    "docker container prune -f",
     "apt-get clean",
-    "journalctl --vacuum-time=7d",
-    "remove stale /tmp maintenance files",
+    "journalctl --vacuum-size=80M",
+    "keep only latest local deploy rollback backups",
 ]
 if status == "ok":
     safe_cleanup = ["monitor only"]
