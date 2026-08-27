@@ -4,6 +4,8 @@
 
 Цель: заморозить состав релиза, проверить RC и не пустить в production неподготовленные изменения.
 
+Последний RC gate отчёт: [RC-GATE-REPORT-2026-08-27.md](./RC-GATE-REPORT-2026-08-27.md).
+
 ## Frozen scope
 
 В RC допускается только:
@@ -114,4 +116,3 @@ RC нельзя выпускать, если:
 - [ ] Prod health green или controlled warning.
 - [ ] Backup и restore-test подтверждены.
 - [ ] Manual recovery команды доступны.
-

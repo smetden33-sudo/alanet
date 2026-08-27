@@ -4,6 +4,8 @@
 
 Цель: подтвердить production release и коммерческий путь перед реальными продажами.
 
+Последний RC gate отчёт: [RC-GATE-REPORT-2026-08-27.md](./RC-GATE-REPORT-2026-08-27.md).
+
 ## Release scope
 
 В Day 30 входит:
@@ -85,4 +87,3 @@ Production release нельзя считать коммерчески завер
 | Commercial release readiness | Частично | Нужны legal docs и real control payment |
 | Production control launch | OK | Read-only публичные endpoints отвечают |
 | Full production release | Не закрыт | Нужен чистый commit/deploy и ручные admin checks |
-
