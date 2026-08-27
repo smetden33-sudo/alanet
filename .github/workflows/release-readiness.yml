@@ -1,0 +1,51 @@
+name: Release readiness checks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "docs/**"
+      - "infra/scripts/day27_28_failure_smoke.py"
+      - ".github/workflows/release-readiness.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "docs/**"
+      - "infra/scripts/day27_28_failure_smoke.py"
+      - ".github/workflows/release-readiness.yml"
+  workflow_dispatch:
+    inputs:
+      live_readonly:
+        description: "Run read-only public endpoint checks"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Run safe release-readiness smoke
+        run: python infra/scripts/day27_28_failure_smoke.py
+
+      - name: Run live read-only smoke
+        if: github.event_name == 'workflow_dispatch' && inputs.live_readonly == 'true'
+        run: python infra/scripts/day27_28_failure_smoke.py --live-readonly
+
