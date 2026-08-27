@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-01",
+  "updated_at": "2026-08-26",
   "source": "production Remnawave /api/nodes and /api/hosts",
   "nodes": [
     {
@@ -32,7 +32,9 @@
       "provider": "existing-shared-vps",
       "status": "active",
       "shared_vps": true,
-      "notes": "Shared VPS; do not reset firewall blindly."
+      "notes": "Shared VPS; do not reset firewall blindly.",
+      "backup_policy": "ignored",
+      "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
     },
     {
       "node_name": "ALANET-CZ-1",
@@ -47,7 +49,9 @@
       "provider": "existing-shared-vps",
       "status": "active",
       "shared_vps": true,
-      "notes": "Trial subscriptions are restricted to this location."
+      "notes": "Trial subscriptions are restricted to this location.",
+      "backup_policy": "ignored",
+      "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
     },
     {
       "node_name": "ALANET-SE-1",
@@ -62,7 +66,9 @@
       "provider": "existing-shared-vps",
       "status": "active",
       "shared_vps": true,
-      "notes": "Shared VPS; do not reset firewall blindly."
+      "notes": "Shared VPS; do not reset firewall blindly.",
+      "backup_policy": "ignored",
+      "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
     },
     {
       "node_name": "ALANET-PL-1",
@@ -120,9 +126,9 @@
       "control_port": 22,
       "squad": "PAID-USERS",
       "provider": "existing-shared-vps",
-      "status": "active",
+      "status": "maintenance",
       "shared_vps": true,
-      "notes": "Reg.ru/OpenStack VPS; ALANET RemnaNode isolated in /opt/remnanode-alanet-ru-1. Existing VLESS was not active during install; do not reset firewall blindly."
+      "notes": "Temporarily removed from sales on 2026-08-13: Remnawave disconnected, ping/SSH/host-port unavailable. Reg.ru/OpenStack VPS; ALANET RemnaNode isolated in /opt/remnanode-alanet-ru-1. Existing VLESS was not active during install; do not reset firewall blindly."
     },
     {
       "node_name": "ALANET-RU-2",
@@ -130,14 +136,102 @@
       "ip": "195.19.20.123",
       "remnawave_node_uuid": "b0054f6f-ddd1-4dfd-9df0-734c8691873e",
       "host_uuid": "90996263-99de-472b-a576-b2898461774f",
-      "host_name": "🇷🇺 Россия 2",
+      "host_name": "🇷🇺 Россия",
       "public_port": 2053,
       "control_port": 22,
       "squad": "PAID-USERS",
       "provider": "existing-shared-vps",
       "status": "active",
       "shared_vps": true,
-      "notes": "Reg.ru/OpenStack VPS; ALANET RemnaNode isolated in /opt/remnanode-alanet-ru-2. Existing VLESS was not active during install; do not reset firewall blindly."
-    }
-  ]
+      "notes": "Rebuilt on 2026-08-14 after VPS reinstall/host-key change; Docker and ALANET RemnaNode restored in /opt/remnanode-alanet-ru-2. SSH deploy key restored. Existing VLESS was not active during install; do not reset firewall blindly.",
+      "backup_policy": "ignored",
+      "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
+    },
+    {
+      "node_name": "ALANET-NL-1",
+      "country": "RO",
+      "ip": "103.102.229.98",
+      "remnawave_node_uuid": "76237946-4ef8-4261-81d7-050575425911",
+      "host_uuid": "2b29cd2c-ee0a-44c3-833b-8b66a2bfd3fb",
+      "host_name": "🇷🇴 Румыния",
+      "public_port": 2053,
+      "control_port": 22,
+      "squad": "PAID-USERS",
+      "provider": "existing-shared-vps",
+      "status": "active",
+      "shared_vps": true,
+      "notes": "Shared VPS; ALANET RemnaNode isolated in /opt/remnanode-alanet-nl-1. Existing VLESS/VPN services on 443/80/51820/51830 were preserved; do not reset firewall blindly. Remnawave production metadata currently exposes this host as Romania.",
+      "backup_policy": "ignored",
+      "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
+    },
+        {
+            "node_name": "ALANET-US-1",
+            "country": "US",
+            "ip": "136.0.116.168",
+      "remnawave_node_uuid": "d4a1ef6b-8111-4d0b-a41b-5c036befbe3f",
+      "host_uuid": "8b84103c-fe4c-4985-8356-241dbacc7bf4",
+      "host_name": "🇺🇸 США",
+      "public_port": 2053,
+      "control_port": 22,
+      "squad": "PAID-USERS",
+      "provider": "existing-shared-vps",
+      "status": "active",
+      "shared_vps": true,
+      "notes": "Utah/US VPS; ALANET RemnaNode isolated in /opt/remnanode-alanet-us-1. Existing Marzban/Xray/Haproxy services on 443/8443/2443/62050/62051/1080 were preserved; do not reset firewall blindly.",
+            "backup_policy": "ignored",
+            "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
+        },
+        {
+            "node_name": "ALANET-CZ-2",
+            "country": "CZ",
+            "ip": "212.192.210.182",
+            "remnawave_node_uuid": "1a01d220-81b5-4b48-9667-c03f69d24b52",
+            "host_uuid": "88db4967-c91c-4ac4-bae8-c9955f8f3c78",
+            "host_name": "🇨🇿 Чехия 2 (10 Гб/с)",
+            "public_port": 2053,
+            "control_port": 22,
+            "squad": "PAID-USERS",
+            "provider": "existing-shared-vps",
+            "status": "active",
+            "shared_vps": true,
+            "notes": "Prague/CZ shared VPS; ALANET RemnaNode isolated in /opt/remnanode-alanet-cz-2. Existing Marzban/Xray/HAProxy services on 443/8443/8444/2443/62050/62051/1080 were preserved; do not reset firewall blindly. RemnaNode pinned to 3.2.0 to match production-compatible nodes.",
+            "backup_policy": "ignored",
+            "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
+        },
+        {
+            "node_name": "ALANET-NL-2",
+            "country": "NL",
+            "ip": "87.58.216.100",
+            "remnawave_node_uuid": "f1f56384-d580-44b7-8867-485ef44dda7b",
+            "host_uuid": "58a3bc56-16b9-4bc2-b27f-c83c714d5774",
+            "host_name": "🇳🇱 Нидерланды",
+            "public_port": 2053,
+            "control_port": 2222,
+            "squad": "PAID-USERS",
+            "provider": "HOSTKEY-AS",
+            "status": "active",
+            "shared_vps": true,
+            "notes": "HOSTKEY Netherlands shared VPS. ALANET RemnaNode is isolated in /opt/remnanode-alanet-nl-2 and pinned to 3.2.0. AmneziaVPN is the primary project; do not change its UDP ports, firewall, routing, containers or configuration. At onboarding time the server was freshly provisioned and AmneziaVPN was not yet installed.",
+            "ping_policy": "ignored",
+            "ping_ignore_reason": "ICMP ping is blocked or filtered on this shared VPS; Remnawave node is connected and host port 2053 is monitored instead.",
+            "backup_policy": "ignored",
+            "backup_ignore_reason": "Controlled risk: AmneziaVPN is the primary project on this shared VPS; ALANET automation must not modify it."
+        },
+        {
+            "node_name": "ALANET-US-2",
+            "country": "TR",
+            "ip": "104.143.204.238",
+            "remnawave_node_uuid": "2b58c4ce-3e21-447b-83e1-db1575b74678",
+            "host_uuid": "ec20db5d-47fb-4743-857c-6ad7594ca7b9",
+            "host_name": "🇹🇷 Турция",
+            "public_port": 2053,
+            "control_port": 2223,
+            "ssh_user": "root",
+            "squad": "PAID-USERS",
+            "provider": "existing-shared-vps",
+            "status": "active",
+            "shared_vps": true,
+            "notes": "Shared VPS; ALANET RemnaNode is isolated in /opt/remnanode-alanet-us-2 and pinned to 3.2.0. Existing services were not changed; do not reset firewall blindly. SSH from prod to port 22 is filtered, so ALANET maintenance SSH uses port 2223. Remnawave control port 2222 and public host port 2053 are reachable from prod. Remnawave geo database resolves this IP as TR, so the public host is shown as Turkey."
+        }
+    ]
 }

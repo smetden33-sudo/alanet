@@ -34,19 +34,76 @@ When a `degraded` or `incident` state returns to `ok`, the admin receives an `AL
 
 Known checks are handled explicitly and summarized as `warning=` or `problem=` records. This prevents alerts such as "health-check failed on line 43/101" for expected operational failures.
 
+### Dedicated Telegram bot for infrastructure alerts
+
+Infrastructure alerts should use a separate Telegram bot, not the customer/sales bot. This keeps client messages, admin commands and infrastructure incidents isolated.
+
+Production health-check reads optional overrides from:
+
+```bash
+/etc/alanet/monitoring-alerts.env
+```
+
+Additional ping-only targets are read from:
+
+```bash
+/etc/alanet/ping-targets
+```
+
+Format:
+
+```text
+LABEL IP
+```
+
+Example:
+
+```text
+EXTERNAL-91-184-249-77 91.184.249.77
+```
+
+Expected file format:
+
+```bash
+ALANET_MONITORING_TELEGRAM_BOT_TOKEN=123456789:AA...
+ALANET_MONITORING_TELEGRAM_CHAT_ID=6137733861
+```
+
+If this file or token is missing, health-check falls back to the main `TELEGRAM_BOT_TOKEN` and `TELEGRAM_ADMIN_CHAT_ID` from `/opt/alanet/deploy/.env`.
+
+Safe setup:
+
+```bash
+sudo install -m 600 -o root -g root infra/deploy/monitoring-alerts.env.example /etc/alanet/monitoring-alerts.env
+sudo nano /etc/alanet/monitoring-alerts.env
+sudo systemctl start alanet-healthcheck.service
+sudo journalctl -u alanet-healthcheck.service -n 80 --no-pager -o cat
+```
+
+For Beszel, add a notification URL in `Settings -> Notifications`:
+
+```text
+telegram://BOT_TOKEN@telegram?channels=6137733861
+```
+
+Use the same dedicated monitoring bot token. After adding the notification, trigger a test alert from Beszel before enabling noisy thresholds.
+
 Default thresholds:
 
 - `ALANET_LOAD_FAILURE_THRESHOLD=3`
 - `ALANET_API_FAILURE_THRESHOLD=3`
 - `ALANET_PORTS_FAILURE_THRESHOLD=3`
+- `ALANET_PING_FAILURE_THRESHOLD=3`
 
 State and diagnostic files:
 
 - `/var/lib/alanet-monitor/health.state` — last state: `ok`, `warning`, `degraded` or `incident`.
 - `/var/lib/alanet-monitor/health.summary` — latest human-readable state summary.
+- `/var/lib/alanet-monitor/health.status.json` — latest machine-readable incident state for bots/dashboards.
 - `/var/lib/alanet-monitor/load.failures` — consecutive load failures.
 - `/var/lib/alanet-monitor/api.failures` — consecutive API health failures.
-- `/var/lib/alanet-monitor/ports.failures` — consecutive host-port failures.
+- `/var/lib/alanet-monitor/ports.failures.d/*.failures` — per-host consecutive host-port failures.
+- `/var/lib/alanet-monitor/ping.failures` — consecutive node IP ping failures.
 
 A counter is reset only when that specific check passes again.
 
@@ -54,7 +111,20 @@ Thresholded/noisy checks:
 
 - API `/health`.
 - Host ports from Remnawave `/api/hosts`.
+- Node public IP ping from `infra/node-registry.json`.
+- Extra ping-only targets from `/etc/alanet/ping-targets`.
 - Server load.
+
+Host-port counters are tracked per `address:port`, not globally. A single dead location must not escalate unrelated transient flaps on healthy locations.
+
+For shared VPS locations where ICMP is intentionally blocked or filtered, set the registry fields:
+
+```json
+"ping_policy": "ignored",
+"ping_ignore_reason": "ICMP ping is blocked or filtered; Remnawave connectivity and host port are monitored instead."
+```
+
+Do this only after confirming that Remnawave reports the node as connected and the public host port is reachable from production.
 
 Immediate critical checks:
 
@@ -75,6 +145,11 @@ sudo journalctl -u alanet-healthcheck.service -n 120 --no-pager -o cat
 sudo cat /var/lib/alanet-monitor/health.state
 sudo sed -n '1,80p' /var/lib/alanet-monitor/health.summary
 ```
+
+Primary Telegram inspection:
+
+- `/incident` — compact duty-engineer card: overall health, DB, Web/API, Remnawave nodes, live host-port count, prod resources, disk, backup/restore/node-backup and E2E.
+- `/health`, `/ports`, `/backup`, `/disk` — detailed follow-up commands after `/incident` points to a failing area.
 
 ## Shared VPS node replacement or removal
 
@@ -124,10 +199,18 @@ Release flow:
 
 1. Push to `main` or run the CI workflow manually.
 2. CI builds `web` and `backend` images and publishes `latest` plus a commit SHA tag to GHCR.
-3. Production runs `docker compose pull web api worker`.
-4. Production runs `docker compose up -d --no-deps web api worker`.
-5. CI performs safe Docker cleanup without volumes before/after deploy.
-6. `alanet-healthcheck.service` must return `ok`; CI retries it up to five times to tolerate short restart/load spikes.
+3. CI copies host-side operational files to production:
+   - `deploy/compose.yml`;
+   - `infra/node-registry.json`;
+   - `infra/scripts/remnawave-registry-sync.py`;
+   - `backend/app/remnawave_registry.py`;
+   - health/disk/ops collector scripts and timers.
+4. CI validates shell scripts, Python helpers and `node-registry.json` before installing them.
+5. CI runs Remnawave registry drift-check on production. Release must stop if registry and Remnawave do not match.
+6. Production runs `docker compose pull web api worker`.
+7. Production runs `docker compose up -d --no-deps web api worker`.
+8. CI performs safe Docker cleanup without volumes before/after deploy.
+9. `alanet-healthcheck.service` must return `ok`; CI retries it up to five times to tolerate short restart/load spikes.
 
 Rollback:
 
@@ -198,6 +281,66 @@ sudo du -xhd2 /var/lib/containerd | sort -h | tail
 ```
 
 If `/` remains above 80-85% after prune, prefer increasing the VPS disk or moving Docker image builds to CI/off-host build runners. Do not run `docker system prune --volumes` on production unless a verified backup and rollback plan exists.
+
+## Local backup retention and rollback cleanup
+
+Production keeps only a short local rollback buffer because the durable archive is S3.
+
+Current policy:
+
+1. `/var/backups/alanet` keeps the latest production backup pairs through `ALANET_LOCAL_RETENTION_KEEP`.
+2. `/var/backups/alanet-nodes` keeps the latest node/head backup pairs through `ALANET_LOCAL_RETENTION_KEEP`.
+3. `/opt/alanet/backups/alanet-*` operational rollback directories are cleaned by `alanet-safe-cleanup`.
+4. An operational rollback directory older than `ALANET_ROLLBACK_RETENTION_DAYS` is deleted only after:
+   - it is archived;
+   - encrypted with `ALANET_BACKUP_ENCRYPTION_PASSPHRASE`;
+   - uploaded to `${ALANET_BACKUP_RCLONE_DEST}/rollback/`;
+   - the remote object size is verified through rclone.
+
+Manual status check:
+
+```bash
+sudo systemctl start alanet-safe-cleanup.service
+sudo cat /var/lib/alanet-monitor/cleanup.status.json
+sudo find /var/backups/alanet /var/backups/alanet-nodes /opt/alanet/backups -maxdepth 2 -type f -printf '%TY-%Tm-%Td %TH:%TM %s %p\n'
+```
+
+Do not delete `/opt/alanet/backups/*` manually if it contains secret-bearing JSON or environment snapshots. First create an encrypted S3 copy and verify it.
+
+## S3 lifecycle retention
+
+Timeweb S3 lifecycle is configured through the S3-compatible Lifecycle API. ALANET manages its own rules with IDs starting with `ALANET-`; non-ALANET lifecycle rules are preserved.
+
+Lifecycle rules:
+
+| Prefix | Retention |
+| --- | ---: |
+| `alanet/prod/daily/` | 7 days |
+| `alanet/prod/weekly/` | 30 days |
+| `alanet/prod/monthly/` | 90 days |
+| `alanet/prod/node-backups/daily/` | 7 days |
+| `alanet/prod/node-backups/weekly/` | 30 days |
+| `alanet/prod/node-backups/monthly/` | 90 days |
+| `alanet/prod/rollback/` | 90 days |
+| `alanet/prod/alanet-` legacy flat prod backups | 30 days |
+| `alanet/prod/node-backups/alanet-node-backups-` legacy flat node backups | 30 days |
+
+Upload behavior:
+
+- `alanet-backup` uploads every encrypted prod backup to `daily/`;
+- on Sunday UTC it also uploads to `weekly/`;
+- on the first day of the month UTC it also uploads to `monthly/`;
+- `alanet-node-backup` does the same under `node-backups/`;
+- operational rollback archives are uploaded to `rollback/`.
+
+Manual lifecycle apply/verify:
+
+```bash
+sudo /opt/alanet/infra/deploy/configure-s3-lifecycle.py
+sudo sed -n '1,220p' /var/lib/alanet-monitor/s3-lifecycle/lifecycle.verified.xml
+```
+
+Important: S3 lifecycle applies to existing objects too. Do not add a broad rule for the whole bucket or for `alanet/prod/` without a recovery plan.
 
 ## Weekly restore-test
 

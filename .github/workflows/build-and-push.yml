@@ -6,10 +6,13 @@ on:
     paths:
       - "app/**"
       - "backend/**"
+      - "deploy/compose.yml"
       - "Dockerfile.web"
       - "package.json"
       - "package-lock.json"
       - "backend/requirements.txt"
+      - "infra/node-registry.json"
+      - "infra/scripts/remnawave-registry-sync.py"
       - "infra/deploy/alanet-disk-report"
       - "infra/deploy/alanet-disk-report.service"
       - "infra/deploy/alanet-disk-report.timer"
@@ -97,8 +100,20 @@ jobs:
           IMAGE_NAMESPACE: ghcr.io/${{ github.repository_owner }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          scp -P "$PROD_SSH_PORT" infra/deploy/alanet-disk-report infra/deploy/alanet-disk-report.service infra/deploy/alanet-disk-report.timer infra/deploy/alanet-prod-ops-collector infra/deploy/alanet-prod-ops-collector.service infra/deploy/alanet-prod-ops-collector.timer infra/deploy/verify-production.sh "$PROD_USER@$PROD_HOST:/tmp/"
-          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; bash -n /tmp/alanet-disk-report; bash -n /tmp/alanet-prod-ops-collector; bash -n /tmp/verify-production.sh; sudo mkdir -p /opt/alanet/infra/deploy /var/lib/alanet-monitor; sudo install -m 0755 /tmp/alanet-disk-report /opt/alanet/infra/deploy/alanet-disk-report; sudo install -m 0644 /tmp/alanet-disk-report.service /etc/systemd/system/alanet-disk-report.service; sudo install -m 0644 /tmp/alanet-disk-report.timer /etc/systemd/system/alanet-disk-report.timer; sudo install -m 0755 /tmp/alanet-prod-ops-collector /opt/alanet/infra/deploy/alanet-prod-ops-collector; sudo install -m 0644 /tmp/alanet-prod-ops-collector.service /etc/systemd/system/alanet-prod-ops-collector.service; sudo install -m 0644 /tmp/alanet-prod-ops-collector.timer /etc/systemd/system/alanet-prod-ops-collector.timer; sudo install -m 0755 /tmp/verify-production.sh /opt/alanet/infra/deploy/verify-production.sh; sudo install -m 0755 /tmp/verify-production.sh /usr/local/sbin/alanet-verify-production; sudo systemctl daemon-reload; sudo systemctl enable --now alanet-disk-report.timer alanet-prod-ops-collector.timer; sudo systemctl start alanet-disk-report.service alanet-prod-ops-collector.service; sudo python3 -m json.tool /var/lib/alanet-monitor/disk.status.json >/dev/null; sudo python3 -m json.tool /var/lib/alanet-monitor/prod-ops.status.json >/dev/null"
+          scp -P "$PROD_SSH_PORT" \
+            deploy/compose.yml \
+            backend/app/remnawave_registry.py \
+            infra/node-registry.json \
+            infra/scripts/remnawave-registry-sync.py \
+            infra/deploy/alanet-disk-report \
+            infra/deploy/alanet-disk-report.service \
+            infra/deploy/alanet-disk-report.timer \
+            infra/deploy/alanet-prod-ops-collector \
+            infra/deploy/alanet-prod-ops-collector.service \
+            infra/deploy/alanet-prod-ops-collector.timer \
+            infra/deploy/verify-production.sh \
+            "$PROD_USER@$PROD_HOST:/tmp/"
+          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; bash -n /tmp/alanet-disk-report; bash -n /tmp/alanet-prod-ops-collector; bash -n /tmp/verify-production.sh; python3 -m py_compile /tmp/remnawave_registry.py /tmp/remnawave-registry-sync.py; python3 -m json.tool /tmp/node-registry.json >/dev/null; sudo mkdir -p /opt/alanet/deploy /opt/alanet/backend/app /opt/alanet/infra/deploy /opt/alanet/infra/scripts /var/lib/alanet-monitor; sudo install -m 0644 /tmp/compose.yml /opt/alanet/deploy/compose.yml; sudo install -m 0644 /tmp/remnawave_registry.py /opt/alanet/backend/app/remnawave_registry.py; sudo install -m 0644 /tmp/node-registry.json /opt/alanet/infra/node-registry.json; sudo install -m 0755 /tmp/remnawave-registry-sync.py /opt/alanet/infra/scripts/remnawave-registry-sync.py; sudo install -m 0755 /tmp/alanet-disk-report /opt/alanet/infra/deploy/alanet-disk-report; sudo install -m 0644 /tmp/alanet-disk-report.service /etc/systemd/system/alanet-disk-report.service; sudo install -m 0644 /tmp/alanet-disk-report.timer /etc/systemd/system/alanet-disk-report.timer; sudo install -m 0755 /tmp/alanet-prod-ops-collector /opt/alanet/infra/deploy/alanet-prod-ops-collector; sudo install -m 0644 /tmp/alanet-prod-ops-collector.service /etc/systemd/system/alanet-prod-ops-collector.service; sudo install -m 0644 /tmp/alanet-prod-ops-collector.timer /etc/systemd/system/alanet-prod-ops-collector.timer; sudo install -m 0755 /tmp/verify-production.sh /opt/alanet/infra/deploy/verify-production.sh; sudo install -m 0755 /tmp/verify-production.sh /usr/local/sbin/alanet-verify-production; TOKEN=\$(sudo sed -n 's/^REMNAWAVE_TOKEN=//p' /opt/alanet/deploy/.env); REMNAWAVE_TOKEN=\"\$TOKEN\" python3 /opt/alanet/infra/scripts/remnawave-registry-sync.py --registry /opt/alanet/infra/node-registry.json --env-file /tmp/alanet-empty-env --base-url https://panel.alanet.ru; sudo systemctl daemon-reload; sudo systemctl enable --now alanet-disk-report.timer alanet-prod-ops-collector.timer; sudo systemctl start alanet-disk-report.service alanet-prod-ops-collector.service; sudo python3 -m json.tool /var/lib/alanet-monitor/disk.status.json >/dev/null; sudo python3 -m json.tool /var/lib/alanet-monitor/prod-ops.status.json >/dev/null"
           ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "set -e; cd /opt/alanet/deploy; sudo docker image prune -af || true; sudo docker builder prune -af || true; sudo docker container prune -f || true; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose pull web api worker; sudo env ALANET_WEB_IMAGE='$IMAGE_NAMESPACE/alanet-web:$IMAGE_TAG' ALANET_BACKEND_IMAGE='$IMAGE_NAMESPACE/alanet-backend:$IMAGE_TAG' docker compose up -d --no-deps web api worker; sudo docker image prune -af || true; sudo docker builder prune -af || true; sudo docker container prune -f || true; sudo docker compose ps web api worker"
           for attempt in 1 2 3 4 5; do
             if ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" "sudo systemctl start alanet-healthcheck.service"; then

@@ -43,6 +43,56 @@ def _host_node_ids(host: dict[str, Any]) -> set[str]:
     return result
 
 
+def _host_inbound(host: dict[str, Any]) -> dict[str, Any]:
+    inbound = host.get("inbound")
+    return inbound if isinstance(inbound, dict) else {}
+
+
+def _node_active_profile_uuid(node: dict[str, Any]) -> str:
+    config_profile = node.get("configProfile")
+    if isinstance(config_profile, dict):
+        return _normalize_text(config_profile.get("activeConfigProfileUuid"))
+    return ""
+
+
+def _node_active_inbound_ids(node: dict[str, Any]) -> set[str]:
+    config_profile = node.get("configProfile")
+    raw_inbounds = config_profile.get("activeInbounds") if isinstance(config_profile, dict) else []
+    if not isinstance(raw_inbounds, list):
+        return set()
+    result: set[str] = set()
+    for item in raw_inbounds:
+        if isinstance(item, str):
+            result.add(item)
+        elif isinstance(item, dict):
+            value = item.get("uuid") or item.get("id")
+            if value is not None:
+                result.add(str(value))
+    return result
+
+
+def _host_matches_node_profile(host: dict[str, Any], node: dict[str, Any] | None) -> bool:
+    """Return True when Remnawave links a host through its inbound/profile.
+
+    Some Remnawave versions return ``host.nodes`` as an empty list even when
+    the host belongs to the node's active inbound. Treating that as a critical
+    binding drift creates noisy false positives, while the inbound/profile pair
+    is enough to prove the operational relationship.
+    """
+
+    if not node:
+        return False
+    inbound = _host_inbound(host)
+    host_profile_uuid = _normalize_text(inbound.get("configProfileUuid"))
+    host_inbound_uuid = _normalize_text(inbound.get("configProfileInboundUuid"))
+    if not host_profile_uuid or not host_inbound_uuid:
+        return False
+    return (
+        host_profile_uuid == _node_active_profile_uuid(node)
+        and host_inbound_uuid in _node_active_inbound_ids(node)
+    )
+
+
 def _normalize_text(value: Any) -> str:
     return str(value or "").strip()
 
@@ -130,7 +180,7 @@ def compare_registry_to_remnawave(
             drift.append(DriftItem("critical", "host_port_mismatch", node_name, f"{node_name}: registry port {expected_port}, Remnawave port {actual_port}."))
         if expected_host_name and actual_name and _display_name_key(actual_name) != _display_name_key(expected_host_name):
             drift.append(DriftItem("warning", "host_name_mismatch", node_name, f"{node_name}: registry host name {expected_host_name}, Remnawave host name {actual_name}."))
-        if node_uuid and node_uuid not in _host_node_ids(remote_host):
+        if node_uuid and node_uuid not in _host_node_ids(remote_host) and not _host_matches_node_profile(remote_host, remote_node):
             drift.append(DriftItem("critical", "host_node_binding_mismatch", node_name, f"{node_name}: host {actual_name or host_uuid} is not bound to registry node UUID {node_uuid}."))
 
     inactive_uuids = {

@@ -1,0 +1,7 @@
+*.sh text eol=lf
+infra/deploy/alanet-* text eol=lf
+infra/deploy/backup-production.sh text eol=lf
+infra/deploy/verify-*.sh text eol=lf
+infra/deploy/*.service text eol=lf
+infra/deploy/*.timer text eol=lf
+*.md text eol=lf
