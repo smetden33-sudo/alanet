@@ -43,7 +43,6 @@ jobs:
             NODE_NAME="$NODE_NAME" \
             NODE_ADDRESS="$NODE_ADDRESS" \
             NODE_PORT="$NODE_PORT" \
-            HOST_REMARK="$HOST_REMARK" \
             HOST_ADDRESS="$HOST_ADDRESS" \
             HOST_PORT="$HOST_PORT" \
             NODE_COUNTRY="$NODE_COUNTRY" \
@@ -51,6 +50,7 @@ jobs:
             INBOUND_TAG="$INBOUND_TAG" \
             'bash -s' <<'REMOTE'
           set -Eeuo pipefail
+          HOST_REMARK="🇩🇪 Германия 2"
 
           token="$(sudo sed -n 's/^REMNAWAVE_TOKEN=//p' /opt/alanet/deploy/.env)"
           if [[ -z "$token" ]]; then
