@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-08-26",
+  "updated_at": "2026-08-29",
   "source": "production Remnawave /api/nodes and /api/hosts",
   "nodes": [
     {
@@ -232,6 +232,23 @@
             "status": "active",
             "shared_vps": true,
             "notes": "Shared VPS; ALANET RemnaNode is isolated in /opt/remnanode-alanet-us-2 and pinned to 3.2.0. Existing services were not changed; do not reset firewall blindly. SSH from prod to port 22 is filtered, so ALANET maintenance SSH uses port 2223. Remnawave control port 2222 and public host port 2053 are reachable from prod. Remnawave geo database resolves this IP as TR, so the public host is shown as Turkey."
+        },
+        {
+            "node_name": "ALANET-DE-2",
+            "country": "DE",
+            "ip": "144.31.214.244",
+            "remnawave_node_uuid": "6c887857-f9c0-4c93-9337-82c68e41f672",
+            "host_uuid": "460bbddb-2243-4b07-8aa7-57f9a28a7e1a",
+            "host_name": "🇩🇪 Германия 2",
+            "public_port": 2053,
+            "control_port": 22,
+            "squad": "PAID-USERS",
+            "provider": "SERV.HOST GROUP LTD",
+            "status": "active",
+            "shared_vps": true,
+            "notes": "Frankfurt/DE shared VPS; ALANET RemnaNode is isolated in /opt/remnanode-alanet-de-2 and pinned to 3.2.0. Existing Xray/VLESS service on 8444 and local Xray API on 127.0.0.1:10085 were preserved; do not reset firewall blindly. Remnawave control port 2222 is allowed only from production, and public host port 2053 is open.",
+            "backup_policy": "ignored",
+            "backup_ignore_reason": "Controlled risk: shared VPS with another VLESS project; ALANET automation must not modify unrelated services."
         }
     ]
 }
