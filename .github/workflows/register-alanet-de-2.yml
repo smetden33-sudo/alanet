@@ -162,4 +162,6 @@ jobs:
             jq -r --arg name "${NODE_NAME}" '(.response | if type == "array" then . else (.nodes // []) end)[]? | select(.name == $name) | "node_state=\(.name) connected=\(.isConnected) uuid=\(.uuid)"'
           curl --fail --silent --show-error "${auth[@]}" "${base_url}/api/hosts" |
             jq -r --arg address "${HOST_ADDRESS}" --argjson port "${HOST_PORT}" '(.response | if type == "array" then . else (.hosts // []) end)[]? | select(.address == $address and .port == $port) | "host_state=\(.remark) address=\(.address):\(.port) uuid=\(.uuid) disabled=\(.isDisabled)"'
+          printf 'node_uuid_b64=%s\n' "$(printf '%s' "${node_uuid}" | base64 -w0)"
+          printf 'host_uuid_b64=%s\n' "$(printf '%s' "${host_uuid}" | base64 -w0)"
           REMOTE
