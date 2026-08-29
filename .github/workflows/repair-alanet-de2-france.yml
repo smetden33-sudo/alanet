@@ -1,0 +1,70 @@
+name: Repair ALANET-DE-2 display location
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/repair-alanet-de2-france.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: repair-alanet-de2-france
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Start SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PROD_SSH_KEY }}
+
+      - name: Add production host key
+        run: ssh-keyscan -p "${{ secrets.PROD_SSH_PORT }}" -H "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Patch customer-facing host location
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+        run: |
+          ssh -p "$PROD_SSH_PORT" "$PROD_USER@$PROD_HOST" 'bash -s' <<'REMOTE'
+          set -Eeuo pipefail
+
+          token="$(sudo sed -n 's/^REMNAWAVE_TOKEN=//p' /opt/alanet/deploy/.env)"
+          auth=(-H "Authorization: Bearer ${token}")
+          json_auth=("${auth[@]}" -H "Content-Type: application/json")
+          base_url="https://panel.alanet.ru"
+
+          hosts_json="$(curl --fail --silent --show-error "${auth[@]}" "${base_url}/api/hosts")"
+          host_json="$(
+            jq -c '(.response | if type == "array" then . else (.hosts // []) end)[]?
+              | select(.address == "144.31.214.244" and .port == 2053)' <<<"${hosts_json}" | head -n1
+          )"
+          if [[ -z "${host_json}" ]]; then
+            echo "ALANET-DE-2 host was not found" >&2
+            exit 1
+          fi
+
+          payload="$(mktemp)"
+          jq '.remark = "🇫🇷 Франция" |
+              .serverDescription = "ALANET France" |
+              .sni = "iv.okcdn.ru" |
+              .fingerprint = "firefox" |
+              .isDisabled = false |
+              .isHidden = false' <<<"${host_json}" > "${payload}"
+          curl --fail --silent --show-error -X PATCH "${json_auth[@]}" --data-binary @"${payload}" "${base_url}/api/hosts" >/dev/null
+          rm -f "${payload}"
+
+          sleep 10
+          curl --fail --silent --show-error "${auth[@]}" "${base_url}/api/hosts" |
+            jq -r '(.response | if type == "array" then . else (.hosts // []) end)[]?
+              | select(.address == "144.31.214.244" and .port == 2053)
+              | "host_state=\(.remark) address=\(.address):\(.port) sni=\(.sni) disabled=\(.isDisabled) description=\(.serverDescription)"'
+          curl --fail --silent --show-error "${auth[@]}" "${base_url}/api/nodes" |
+            jq -r '(.response | if type == "array" then . else (.nodes // []) end)[]?
+              | select(.name == "ALANET-DE-2")
+              | "node_state=\(.name) connected=\(.isConnected)"'
+          REMOTE
