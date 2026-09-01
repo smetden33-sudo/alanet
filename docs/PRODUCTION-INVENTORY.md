@@ -18,7 +18,7 @@ python infra/scripts/render-node-registry.py --format markdown
 | ALANET-SE-1 | SE | 89.125.243.225 | eeddedb1-1144-4e37-93ec-584ea5f8aacf | 82623a5c-ee0f-4116-b9ff-a4b182f7c26e | 2053 | 22 | PAID-USERS | existing-shared-vps | active |
 | ALANET-PL-1 | PL | 78.17.154.237 | 329e3229-b142-4d17-9b89-28c39337731e | ef704276-c89b-446c-84ca-e5a9a4a30aca | 2053 | 34852 | PAID-USERS | existing-shared-vps | active |
 | ALANET-ES-1 | ES | 78.17.180.246 | 75ded50a-09b1-4efc-bc68-57a8f21fdd96 | 357bcce5-31b3-43cb-8228-3913ba26f22b | 2053 | 22 | PAID-USERS | existing-shared-vps | active |
-| ALANET-LV-1 | LV | 213.155.12.131 | d52aad4e-4e49-4247-9a5f-1312fe40a512 | 32f75a50-ff6a-4c46-b43d-3f43098e158d | 2053 | 22 | PAID-USERS | existing-shared-vps | active |
+| ALANET-LV-1 | LV | 194.1.134.145 | d52aad4e-4e49-4247-9a5f-1312fe40a512 | 32f75a50-ff6a-4c46-b43d-3f43098e158d | 2053 | 34852 | PAID-USERS | existing-shared-vps | active |
 
 ## Internal squads
 
