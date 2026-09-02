@@ -10,6 +10,7 @@
 - `remnawave_node_uuid`
 - `host_uuid`
 - `public_port`
+- `smart_route_id`
 - `control_port`
 - `squad`
 - `provider`
@@ -23,6 +24,30 @@
 - документация может генерировать таблицу командой `python infra/scripts/render-node-registry.py --format markdown`;
 - Ansible inventory можно получить командой `python infra/scripts/render-node-registry.py --format ansible`;
 - Terraform/Beszel/Remnawave sync используют этот файл как входной inventory.
+
+## Smart Route / cascade
+
+Smart Route настроен в Remnawave через поле `vlessRouteId` у host'ов. Одинаковый `smart_route_id` означает один cascade-маршрут: клиент получает несколько host'ов одной логической локации, а приложение может выбрать рабочий/лучший вариант.
+
+Текущая карта:
+
+| smart_route_id | Локация | Host'ы | Дублирование |
+| ---: | --- | --- | --- |
+| 10 | Финляндия | `ALANET-FIN-01` | нет |
+| 20 | Германия | `ALANET-DE-1` | нет по стране |
+| 30 | Франция | `ALANET-DE-2` / host `🇫🇷 Франция` | нет по стране; технически использует profile `COMMERCIAL-REALITY-DE-1` |
+| 40 | Чехия | `ALANET-CZ-1`, `ALANET-CZ-2` | да, intentional cascade |
+| 50 | Турция | `ALANET-US-2` / host `🇹🇷 Турция` | нет |
+| 60 | Румыния | `ALANET-NL-1` / host `🇷🇴 Румыния` | нет |
+| 70 | Швеция | `ALANET-SE-1` | нет |
+| 80 | Польша | `ALANET-PL-1` | нет |
+| 90 | Испания | `ALANET-ES-1` | нет |
+| 100 | Латвия | `ALANET-LV-1` | нет |
+| 110 | США | `ALANET-US-1` | нет |
+| 120 | Нидерланды | `ALANET-NL-2` | нет |
+| 130 | Россия | `ALANET-RU-2` | нет; `ALANET-RU-1` остаётся disabled/maintenance |
+
+Известное техническое дублирование: `ALANET-DE-1`, `ALANET-RU-2` и `ALANET-DE-2` используют один config profile/inbound `COMMERCIAL-REALITY-DE-1 / VLESS_TCP_REALITY_DE_1`. Клиентские host'ы при этом разные и имеют разные `vlessRouteId`. Следующий архитектурный шаг — выделить отдельные profiles/inbounds для `RU-2` и `FR`, чтобы убрать этот технический дубль.
 
 Текущая таблица:
 
