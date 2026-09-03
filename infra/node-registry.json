@@ -109,7 +109,7 @@
     {
       "node_name": "ALANET-LV-1",
       "country": "LV",
-      "ip": "194.1.134.145",
+      "ip": "194.1.134.158",
       "remnawave_node_uuid": "d52aad4e-4e49-4247-9a5f-1312fe40a512",
       "host_uuid": "32f75a50-ff6a-4c46-b43d-3f43098e158d",
       "host_name": "🇱🇻 Латвия",
@@ -120,7 +120,7 @@
       "provider": "existing-shared-vps",
       "status": "active",
       "shared_vps": true,
-      "notes": "LV015 changed IP from 213.155.12.131 to 194.1.134.145 on 2026-09-02. Key-based SSH uses port 34852; Remnawave control port 2222 is reachable from prod only; public host port 2053 is open."
+      "notes": "LV015 changed IP from 213.155.12.131 to 194.1.134.145 on 2026-09-02, then to 194.1.134.158 on 2026-09-04. Key-based SSH uses port 34852; Remnawave control port 2222 is reachable from prod only; public host port 2053 is open."
     },
     {
       "node_name": "ALANET-RU-1",
