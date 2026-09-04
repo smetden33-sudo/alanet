@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-09-02",
+  "updated_at": "2026-09-04",
   "source": "production Remnawave /api/nodes and /api/hosts",
   "nodes": [
     {
@@ -195,7 +195,7 @@
         {
             "node_name": "ALANET-CZ-2",
             "country": "CZ",
-            "ip": "212.192.210.182",
+            "ip": "13.143.234.94",
             "remnawave_node_uuid": "1a01d220-81b5-4b48-9667-c03f69d24b52",
             "host_uuid": "88db4967-c91c-4ac4-bae8-c9955f8f3c78",
             "host_name": "🇨🇿 Чехия 2 (10 Гб/с)",
@@ -206,7 +206,7 @@
             "provider": "existing-shared-vps",
             "status": "active",
             "shared_vps": true,
-            "notes": "Prague/CZ shared VPS; ALANET RemnaNode isolated in /opt/remnanode-alanet-cz-2. Existing Marzban/Xray/HAProxy services on 443/8443/8444/2443/62050/62051/1080 were preserved; do not reset firewall blindly. RemnaNode pinned to 3.2.0 to match production-compatible nodes.",
+            "notes": "Prague/CZ shared VPS; IP changed from 212.192.210.182 to 13.143.234.94 on 2026-09-04. ALANET RemnaNode isolated in /opt/remnanode-alanet-cz-2. Existing Marzban/Xray/HAProxy services on 443/8443/8444/2443/62050/62051/1080 were preserved; do not reset firewall blindly. RemnaNode pinned to 3.2.0 to match production-compatible nodes.",
             "backup_policy": "ignored",
             "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
         },
