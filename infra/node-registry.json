@@ -204,9 +204,9 @@
             "control_port": 22,
             "squad": "PAID-USERS",
             "provider": "existing-shared-vps",
-            "status": "active",
+            "status": "maintenance",
             "shared_vps": true,
-            "notes": "Prague/CZ shared VPS; IP changed from 212.192.210.182 to 13.143.234.94 on 2026-09-04. ALANET RemnaNode isolated in /opt/remnanode-alanet-cz-2. Existing Marzban/Xray/HAProxy services on 443/8443/8444/2443/62050/62051/1080 were preserved; do not reset firewall blindly. RemnaNode pinned to 3.2.0 to match production-compatible nodes.",
+            "notes": "Prague/CZ shared VPS; IP changed from 212.192.210.182 to 13.143.234.94 on 2026-09-04. Remnawave node record was deleted on 2026-09-06 for full server reinstall; host UUID 88db4967-c91c-4ac4-bae8-c9955f8f3c78 remains in Remnawave without attached nodes. ALANET RemnaNode isolated in /opt/remnanode-alanet-cz-2. Existing Marzban/Xray/HAProxy services on 443/8443/8444/2443/62050/62051/1080 were preserved; do not reset firewall blindly. RemnaNode pinned to 3.2.0 to match production-compatible nodes.",
             "backup_policy": "ignored",
             "backup_ignore_reason": "Controlled risk: do not touch this shared node; SSH from prod is intentionally not remediated."
         },
