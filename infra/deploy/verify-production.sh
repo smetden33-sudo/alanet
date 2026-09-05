@@ -450,6 +450,9 @@ else
       tr -d '\r\n' < /tmp/alanet-client-subscription | base64 -d > /tmp/alanet-client-subscription.decoded 2>/dev/null || true
     fi
     if grep -q '^vless://' /tmp/alanet-client-subscription.decoded 2>/dev/null; then
+      if ! grep -q 'flow=xtls-rprx-vision' /tmp/alanet-client-subscription.decoded 2>/dev/null; then
+        add_incident "Latest subscription is missing xtls-rprx-vision flow. Impact: Reality clients may fail to connect."
+      fi
       printf 'vless_subscription=valid\n'
     else
       add_incident "Latest subscription does not contain VLESS links. Impact: clients may receive invalid configuration."
