@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     remnawave_token: SecretStr = SecretStr("")
     remnawave_squad_id: str = ""
     remnawave_trial_squad_id: str = ""
+    remnawave_expired_squad_id: str = ""
+    remnawave_expired_grace_days: int = 3
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_webhook_secret: SecretStr = SecretStr("")
     telegram_bot_username: str = "alanet_bot"

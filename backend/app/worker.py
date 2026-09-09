@@ -23,6 +23,7 @@ celery.conf.update(task_serializer="json", accept_content=["json"], result_seria
     "retry-provisioning": {"task": "app.worker.retry_provisioning", "schedule": 60.0},
     "reconcile-payments": {"task": "app.worker.reconcile_payments", "schedule": 300.0},
     "subscription-lifecycle": {"task": "app.worker.subscription_lifecycle", "schedule": 300.0},
+    "expired-telegram-access": {"task": "app.worker.expired_telegram_access", "schedule": 300.0},
     "daily-admin-report": {"task": "app.worker.daily_admin_report", "schedule": crontab(hour=6, minute=0)},
     "daily-finance-reconciliation": {"task": "app.worker.daily_finance_reconciliation", "schedule": crontab(hour=6, minute=20)},
 })
@@ -203,6 +204,52 @@ async def _subscription_lifecycle() -> dict[str, int]:
     return {"expired": expired_count, "notices": notice_count}
 
 
+async def _expired_telegram_access() -> int:
+    """Restore a short Telegram-only fallback for expired Remnawave users."""
+    squad_id = settings.remnawave_expired_squad_id.strip()
+    if not squad_id:
+        log.warning("expired Telegram access is disabled: REMNAWAVE_EXPIRED_SQUAD_ID is empty")
+        return 0
+    if settings.remnawave_expired_grace_days <= 0:
+        log.error("expired Telegram access is disabled: REMNAWAVE_EXPIRED_GRACE_DAYS must be positive")
+        return 0
+
+    users = await RemnawaveClient(settings).list_users()
+    expired_users = [user for user in users if user.get("status") == "EXPIRED" and user.get("uuid")]
+    if not expired_users:
+        return 0
+
+    expiry = datetime.now(UTC) + timedelta(days=settings.remnawave_expired_grace_days)
+    updated = 0
+    client = RemnawaveClient(settings)
+    async with SessionLocal() as session:
+        for user in expired_users:
+            try:
+                await client.update_user(
+                    int(user["id"]),
+                    user_uuid=str(user["uuid"]),
+                    status="ACTIVE",
+                    expireAt=expiry.isoformat(),
+                    hwidDeviceLimit=1,
+                    activeInternalSquads=[squad_id],
+                )
+                session.add(AuditLog(
+                    actor="worker:expired-telegram-access",
+                    action="expired_telegram_access_granted",
+                    entity="remnawave_user",
+                    entity_id=str(user["uuid"]),
+                    details={"user_id": user.get("id"), "squad_id": squad_id, "expires_at": expiry.isoformat()},
+                ))
+                await session.commit()
+                updated += 1
+            except Exception:
+                await session.rollback()
+                log.exception("expired Telegram access grant failed for user %s", user.get("uuid"))
+    if updated:
+        await notify_admin(settings, f"ALANET: Telegram-only fallback granted to {updated} expired Remnawave users for {settings.remnawave_expired_grace_days} days.")
+    return updated
+
+
 async def _daily_admin_report() -> bool:
     now = datetime.now(UTC)
     since = now - timedelta(days=1)
@@ -291,6 +338,11 @@ def reconcile_payments() -> int:
 @celery.task(name="app.worker.subscription_lifecycle")
 def subscription_lifecycle() -> dict[str, int]:
     return run_async_task(_subscription_lifecycle())
+
+
+@celery.task(name="app.worker.expired_telegram_access")
+def expired_telegram_access() -> int:
+    return run_async_task(_expired_telegram_access())
 
 
 @celery.task(name="app.worker.daily_admin_report")
