@@ -24,6 +24,7 @@ celery.conf.update(task_serializer="json", accept_content=["json"], result_seria
     "reconcile-payments": {"task": "app.worker.reconcile_payments", "schedule": 300.0},
     "subscription-lifecycle": {"task": "app.worker.subscription_lifecycle", "schedule": 300.0},
     "expired-telegram-access": {"task": "app.worker.expired_telegram_access", "schedule": 300.0},
+    "node-audit": {"task": "app.worker.node_audit", "schedule": crontab(hour="*/6", minute=0)},
     "daily-admin-report": {"task": "app.worker.daily_admin_report", "schedule": crontab(hour=6, minute=0)},
     "daily-finance-reconciliation": {"task": "app.worker.daily_finance_reconciliation", "schedule": crontab(hour=6, minute=20)},
 })
@@ -250,6 +251,61 @@ async def _expired_telegram_access() -> int:
     return updated
 
 
+async def _node_audit() -> bool:
+    """Send a six-hourly read-only audit of all Remnawave nodes and hosts."""
+    now = datetime.now(UTC)
+    try:
+        client = RemnawaveClient(settings)
+        nodes, hosts = await asyncio.gather(client.list_nodes(), client.list_hosts())
+        registry = load_node_registry()
+        drift = compare_registry_to_remnawave(registry, nodes, hosts)
+        critical_drift = [item for item in drift if item.severity == "critical"]
+        warning_drift = [item for item in drift if item.severity == "warning"]
+
+        enabled_hosts = [host for host in hosts if not host.get("isDisabled", False)]
+        port_checks = [
+            (host, _tcp_port_open(str(host.get("address")), int(host.get("port"))))
+            for host in enabled_hosts
+            if host.get("address") and host.get("port")
+        ]
+        port_results = await asyncio.gather(*(check for _host, check in port_checks)) if port_checks else []
+        failed_ports = [
+            f"{host.get('remark') or host.get('name') or host.get('address')} {host.get('address')}:{host.get('port')}"
+            for (host, _check), ok in zip(port_checks, port_results, strict=False)
+            if not ok
+        ]
+        down_nodes = [str(node.get("name") or node.get("uuid") or "unknown") for node in nodes if node.get("isConnected") is False]
+        connected = sum(1 for node in nodes if node.get("isConnected") is True)
+
+        lines = [
+            "ALANET: аудит нод",
+            f"Время: {now.astimezone().strftime('%d.%m.%Y %H:%M %Z')}",
+            f"Ноды: {connected}/{len(nodes)} подключены",
+            f"Активные host: {len(enabled_hosts)}",
+            f"Drift: critical {len(critical_drift)}, warnings {len(warning_drift)}",
+            f"Недоступные host-порты: {len(failed_ports)}",
+        ]
+        if down_nodes:
+            lines.append("⛔ Ноды: " + ", ".join(down_nodes[:20]))
+        if failed_ports:
+            lines.append("⛔ Порты: " + "; ".join(failed_ports[:20]))
+        for item in (critical_drift + warning_drift)[:20]:
+            icon = "⛔" if item.severity == "critical" else "⚠️"
+            lines.append(f"{icon} {item.message}")
+        if not down_nodes and not failed_ports and not drift:
+            lines.append("✅ Все ноды, host-порты и registry без проблем.")
+        elif len(critical_drift) + len(warning_drift) > 20:
+            lines.append(f"… ещё drift-записей: {len(drift) - 20}")
+    except Exception as exc:
+        log.exception("node_audit_failed")
+        lines = [
+            "ALANET: аудит нод",
+            f"Время: {now.astimezone().strftime('%d.%m.%Y %H:%M %Z')}",
+            f"⛔ Аудит не выполнен: {type(exc).__name__}",
+        ]
+    return await notify_admin(settings, "\n".join(lines))
+
+
 async def _daily_admin_report() -> bool:
     now = datetime.now(UTC)
     since = now - timedelta(days=1)
@@ -343,6 +399,11 @@ def subscription_lifecycle() -> dict[str, int]:
 @celery.task(name="app.worker.expired_telegram_access")
 def expired_telegram_access() -> int:
     return run_async_task(_expired_telegram_access())
+
+
+@celery.task(name="app.worker.node_audit")
+def node_audit() -> bool:
+    return run_async_task(_node_audit())
 
 
 @celery.task(name="app.worker.daily_admin_report")
