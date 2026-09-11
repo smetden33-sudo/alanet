@@ -251,6 +251,31 @@ async def _expired_telegram_access() -> int:
     return updated
 
 
+def _translate_node_audit_message(message: str) -> str:
+    """Translate registry drift details for the administrator-facing report."""
+    translations = (
+        ("node is disconnected in Remnawave.", "нода отключена в Remnawave."),
+        ("Remnawave has node not present as active in registry:", "В Remnawave есть нода, отсутствующая среди активных в реестре:"),
+        ("Remnawave has enabled host not present as active in registry:", "В Remnawave есть включённый host, отсутствующий среди активных в реестре:"),
+        ("Registry node ", "Нода реестра "),
+        (" is missing in Remnawave.", " отсутствует в Remnawave."),
+        ("host ", "host "),
+        (" is disabled in Remnawave.", " отключён в Remnawave."),
+        ("registry host IP ", "IP host в реестре "),
+        (", Remnawave IP ", ", IP в Remnawave "),
+        ("registry port ", "порт в реестре "),
+        (", Remnawave port ", ", порт в Remnawave "),
+        ("registry UUID ", "UUID в реестре "),
+        (", Remnawave UUID ", ", UUID в Remnawave "),
+        ("is not bound to registry node UUID ", "не привязан к UUID ноды из реестра "),
+        ("Remnawave node is not connected.", "нода Remnawave не подключена."),
+    )
+    translated = message
+    for source, target in translations:
+        translated = translated.replace(source, target)
+    return translated
+
+
 async def _node_audit() -> bool:
     """Send a six-hourly read-only audit of all Remnawave nodes and hosts."""
     now = datetime.now(UTC)
@@ -280,28 +305,28 @@ async def _node_audit() -> bool:
         lines = [
             "ALANET: аудит нод",
             f"Время: {now.astimezone().strftime('%d.%m.%Y %H:%M %Z')}",
-            f"Ноды: {connected}/{len(nodes)} подключены",
-            f"Активные host: {len(enabled_hosts)}",
-            f"Drift: critical {len(critical_drift)}, warnings {len(warning_drift)}",
-            f"Недоступные host-порты: {len(failed_ports)}",
+            f"Ноды: подключены {connected} из {len(nodes)}",
+            f"Активных host: {len(enabled_hosts)}",
+            f"Расхождения: критических {len(critical_drift)}, предупреждений {len(warning_drift)}",
+            f"Недоступных host-портов: {len(failed_ports)}",
         ]
         if down_nodes:
-            lines.append("⛔ Ноды: " + ", ".join(down_nodes[:20]))
+            lines.append("⛔ Отключённые ноды: " + ", ".join(down_nodes[:20]))
         if failed_ports:
-            lines.append("⛔ Порты: " + "; ".join(failed_ports[:20]))
+            lines.append("⛔ Недоступные порты: " + "; ".join(failed_ports[:20]))
         for item in (critical_drift + warning_drift)[:20]:
             icon = "⛔" if item.severity == "critical" else "⚠️"
-            lines.append(f"{icon} {item.message}")
+            lines.append(f"{icon} {_translate_node_audit_message(item.message)}")
         if not down_nodes and not failed_ports and not drift:
-            lines.append("✅ Все ноды, host-порты и registry без проблем.")
+            lines.append("✅ Все ноды, host-порты и реестр работают без проблем.")
         elif len(critical_drift) + len(warning_drift) > 20:
-            lines.append(f"… ещё drift-записей: {len(drift) - 20}")
+            lines.append(f"… ещё записей о расхождениях: {len(drift) - 20}")
     except Exception as exc:
         log.exception("node_audit_failed")
         lines = [
             "ALANET: аудит нод",
             f"Время: {now.astimezone().strftime('%d.%m.%Y %H:%M %Z')}",
-            f"⛔ Аудит не выполнен: {type(exc).__name__}",
+            f"⛔ Не удалось выполнить аудит: {type(exc).__name__}",
         ]
     return await notify_admin(settings, "\n".join(lines))
 
