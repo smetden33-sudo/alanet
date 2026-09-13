@@ -24,7 +24,8 @@ test("server-renders the finished Russian landing page", async () => {
   assert.match(html, /24 часа/);
   assert.match(html, /1 локация/);
   assert.match(html, /t\.me\/alanet_bot\?start=trial/);
-  assert.match(html, /\/checkout\?plan=/);
+  assert.match(html, /href="https:\/\/t\.me\/alanet_bot"/);
+  assert.match(html, /Выбрать/);
   assert.match(html, /property="og:image"/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
