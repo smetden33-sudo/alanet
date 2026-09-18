@@ -100,22 +100,22 @@ def _backup_restore_snapshot() -> list[str]:
         age_text = f"{age:.1f}h" if age is not None else "unknown"
         archive = Path(str(backup.get("archive") or "")).name or "unknown"
         external = backup.get("external_archive") or "none"
-        external_state = "external=yes" if external != "none" else "external=no"
-        lines.append(f"Backup: {backup.get('status')} {archive}, age {age_text}, {external_state}")
+        external_state = "внешняя=да" if external != "none" else "внешняя=нет"
+        lines.append(f"Резервная копия: {backup.get('status')} {archive}, возраст {age_text}, {external_state}")
     else:
-        lines.append("Backup: no status file")
+        lines.append("Резервная копия: файл состояния отсутствует")
     restore = _read_monitor_status("restore-test.status.json")
     if restore:
         age = _status_age_hours(restore.get("timestamp"))
         age_text = f"{age:.1f}h" if age is not None else "unknown"
         lines.append(
-            "Restore-test: "
-            f"{restore.get('status')} source={restore.get('source')}, age {age_text}, "
-            f"tables={restore.get('tables')}, customers={restore.get('customers')}, "
-            f"orders={restore.get('orders')}, subscriptions={restore.get('subscriptions')}, payments={restore.get('payments')}"
+            "Тест восстановления: "
+            f"{restore.get('status')} источник={restore.get('source')}, возраст {age_text}, "
+            f"таблицы={restore.get('tables')}, клиенты={restore.get('customers')}, "
+            f"заказы={restore.get('orders')}, подписки={restore.get('subscriptions')}, платежи={restore.get('payments')}"
         )
     else:
-        lines.append("Restore-test: no status file")
+        lines.append("Тест восстановления: файл состояния отсутствует")
     return lines
 
 
@@ -374,28 +374,28 @@ async def _daily_admin_report() -> bool:
         drift_warnings = -1
     revenue = revenue or 0
     lines = [
-        "Daily ALANET audit report",
-        f"Period: {since.astimezone().strftime('%d.%m %H:%M')} - {now.astimezone().strftime('%d.%m %H:%M')}",
+        "Ежедневный отчёт ALANET",
+        f"Период: {since.astimezone().strftime('%d.%m %H:%M')} — {now.astimezone().strftime('%d.%m %H:%M')}",
         "",
-        f"New customers: {customers}",
-        f"Successful payments: {payments}",
-        f"Revenue 24h: {revenue:.2f} RUB",
-        f"Active subscriptions: {active}",
-        f"Failed provisioning: {failed}",
-        f"Expiring <=24h: {expiring_24h}",
-        f"Expiring <=72h: {expiring_72h}",
-        f"Webhook errors: {webhook_errors}",
-        f"Nodes: {node_status}",
-        f"Registry drift: critical {drift_critical}, warnings {drift_warnings}",
-        f"Resources: {_resource_snapshot()}",
+        f"Новые клиенты: {customers}",
+        f"Успешные платежи: {payments}",
+        f"Доход за 24 часа: {revenue:.2f} RUB",
+        f"Активные подписки: {active}",
+        f"Ошибки выдачи: {failed}",
+        f"Истекают в течение 24 часов: {expiring_24h}",
+        f"Истекают в течение 72 часов: {expiring_72h}",
+        f"Ошибки вебхуков: {webhook_errors}",
+        f"Ноды: {node_status}",
+        f"Расхождения реестра: критических {drift_critical}, предупреждений {drift_warnings}",
+        f"Ресурсы: {_resource_snapshot()}",
     ]
     lines.extend(_backup_restore_snapshot())
     if down_nodes:
-        lines.append("Down nodes: " + ", ".join(down_nodes[:10]))
+        lines.append("Недоступные ноды: " + ", ".join(down_nodes[:10]))
     if failed_ports:
-        lines.append("Down host ports: " + "; ".join(failed_ports[:10]))
+        lines.append("Недоступные host-порты: " + "; ".join(failed_ports[:10]))
     if not down_nodes and not failed_ports and failed == 0 and webhook_errors == 0:
-        lines.append("Summary: all quiet.")
+        lines.append("Итог: проблем не обнаружено.")
     return await notify_admin(settings, "\n".join(lines))
 
 
