@@ -186,7 +186,7 @@ def compare_registry_to_remnawave(
     inactive_uuids = {
         str(node.get("remnawave_node_uuid"))
         for node in all_registry_nodes
-        if node.get("status") != "active" and node.get("remnawave_node_uuid")
+        if node.get("status") not in {"active", "maintenance"} and node.get("remnawave_node_uuid")
     }
     for remote_node in remnawave_nodes:
         remote_uuid = _node_id(remote_node)
@@ -199,6 +199,8 @@ def compare_registry_to_remnawave(
     for remote_host in remnawave_hosts:
         remote_uuid = _host_id(remote_host)
         remote_name = _normalize_text(remote_host.get("remark") or remote_host.get("name") or remote_host.get("address"))
+        if remote_name.casefold().replace(" ", "") in {"🌎толькотелеграм(3дня)", "толькотелеграм(3дня)"}:
+            continue
         if remote_uuid and remote_uuid not in expected_host_uuids and remote_host.get("isDisabled") is not True:
             drift.append(DriftItem("warning", "extra_host", remote_name or remote_uuid, f"Remnawave has enabled host not present as active in registry: {remote_name or remote_uuid}."))
 
